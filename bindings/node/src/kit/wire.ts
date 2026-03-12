@@ -3,7 +3,7 @@ import type { AccountMeta } from "@solana/instructions";
 import { isSignerRole, isWritableRole } from "@solana/instructions";
 import { lamports } from "@solana/rpc-types";
 import type { Instruction } from "@solana/instructions";
-import type { KeyedAccount } from "./types.js";
+import type { SvmAccount } from "./types.js";
 import type { ExecutionResult } from "../index.js";
 
 const addressEncoder = getAddressEncoder();
@@ -52,9 +52,9 @@ export function serializeInstructions(ixs: Instruction[]): Buffer {
   return buf;
 }
 
-export function serializeAccounts(accounts: KeyedAccount[]): Buffer {
+export function serializeAccounts(accounts: SvmAccount[]): Buffer {
   let total = 4;
-  for (const a of accounts) total += 32 + 32 + 8 + 4 + a.info.data.length + 1;
+  for (const a of accounts) total += 32 + 32 + 8 + 4 + a.data.length + 1;
 
   const buf = Buffer.alloc(total);
   let o = 0;
@@ -64,15 +64,15 @@ export function serializeAccounts(accounts: KeyedAccount[]): Buffer {
   for (const a of accounts) {
     buf.set(addressEncoder.encode(a.address), o);
     o += 32;
-    buf.set(addressEncoder.encode(a.info.owner), o);
+    buf.set(addressEncoder.encode(a.programAddress), o);
     o += 32;
-    buf.writeBigUInt64LE(BigInt(a.info.lamports), o);
+    buf.writeBigUInt64LE(BigInt(a.lamports), o);
     o += 8;
-    buf.writeUInt32LE(a.info.data.length, o);
+    buf.writeUInt32LE(a.data.length, o);
     o += 4;
-    buf.set(a.info.data, o);
-    o += a.info.data.length;
-    buf[o++] = a.info.executable ? 1 : 0;
+    buf.set(a.data, o);
+    o += a.data.length;
+    buf[o++] = a.executable ? 1 : 0;
   }
   return buf;
 }
@@ -81,7 +81,7 @@ export function serializeAccounts(accounts: KeyedAccount[]): Buffer {
 // Deserialization (wire format -> JS)
 // ---------------------------------------------------------------------------
 
-export function deserializeResult(data: Buffer): ExecutionResult<KeyedAccount> {
+export function deserializeResult(data: Buffer): ExecutionResult<SvmAccount> {
   let o = 0;
 
   const status = data.readInt32LE(o);
@@ -98,11 +98,11 @@ export function deserializeResult(data: Buffer): ExecutionResult<KeyedAccount> {
 
   const numAccts = data.readUInt32LE(o);
   o += 4;
-  const accounts: KeyedAccount[] = [];
+  const accounts: SvmAccount[] = [];
   for (let i = 0; i < numAccts; i++) {
-    const address = addressDecoder.decode(data.subarray(o, o + 32));
+    const acctAddress = addressDecoder.decode(data.subarray(o, o + 32));
     o += 32;
-    const owner = addressDecoder.decode(data.subarray(o, o + 32));
+    const programAddress = addressDecoder.decode(data.subarray(o, o + 32));
     o += 32;
     const rawLamports = data.readBigUInt64LE(o);
     o += 8;
@@ -112,8 +112,12 @@ export function deserializeResult(data: Buffer): ExecutionResult<KeyedAccount> {
     o += dLen;
     const executable = data[o++] !== 0;
     accounts.push({
-      address,
-      info: { owner, lamports: lamports(rawLamports), data: acctData, executable },
+      address: acctAddress,
+      data: acctData,
+      executable,
+      lamports: lamports(rawLamports),
+      programAddress,
+      space: BigInt(dLen),
     });
   }
 

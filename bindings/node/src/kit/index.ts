@@ -12,7 +12,7 @@ import type {
   Clock,
   EpochSchedule,
 } from "../index.js";
-import type { KeyedAccount } from "./types.js";
+import type { SvmAccount } from "./types.js";
 import {
   SPL_TOKEN_PROGRAM_ID,
   SPL_TOKEN_2022_PROGRAM_ID,
@@ -22,7 +22,7 @@ import {
   loadElf,
 } from "../programs.js";
 
-export type { KitExecutionResult, AccountInfo, KeyedAccount } from "./types.js";
+export type { KitExecutionResult, SvmAccount } from "./types.js";
 export type { ExecutionResult, Clock, EpochSchedule } from "../index.js";
 export { SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID, LOADER_V2, LOADER_V3 } from "../programs.js";
 
@@ -117,8 +117,8 @@ export class QuasarSvm {
 
   processInstruction(
     instructions: Instruction | Instruction[],
-    accounts: KeyedAccount[]
-  ): ExecutionResult<KeyedAccount> {
+    accounts: SvmAccount[]
+  ): ExecutionResult<SvmAccount> {
     const ixs = Array.isArray(instructions) ? instructions : [instructions];
     return this.exec(
       ffi.quasar_svm_process_instructions,
@@ -129,8 +129,8 @@ export class QuasarSvm {
 
   processTransaction(
     instructions: Instruction[],
-    accounts: KeyedAccount[]
-  ): ExecutionResult<KeyedAccount> {
+    accounts: SvmAccount[]
+  ): ExecutionResult<SvmAccount> {
     return this.exec(
       ffi.quasar_svm_process_transaction,
       serializeInstructions(instructions),
@@ -152,7 +152,7 @@ export class QuasarSvm {
     fn: Function,
     ixBuf: Buffer,
     acctBuf: Buffer
-  ): ExecutionResult<KeyedAccount> {
+  ): ExecutionResult<SvmAccount> {
     const ptrOut = [null as unknown];
     const lenOut = [BigInt(0)];
 
