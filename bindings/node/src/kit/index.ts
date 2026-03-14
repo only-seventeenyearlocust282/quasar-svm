@@ -34,6 +34,24 @@ export type { MintData, TokenAccountData } from "../token.js";
 const addressEncoder = getAddressEncoder();
 const addressDecoder = getAddressDecoder();
 
+interface MintOpts {
+  mintAuthority?: Address;
+  supply?: bigint;
+  decimals?: number;
+  freezeAuthority?: Address;
+}
+
+interface TokenAccountOpts {
+  mint: Address;
+  owner: Address;
+  amount: bigint;
+  delegate?: Address;
+  state?: TokenAccountState;
+  isNative?: bigint;
+  delegatedAmount?: bigint;
+  closeAuthority?: Address;
+}
+
 export class QuasarSvm {
   private ptr: unknown;
   private freed = false;
@@ -107,71 +125,23 @@ export class QuasarSvm {
   }
 
   /** Store a pre-initialized SPL Token mint account. */
-  addMintAccount(
-    pubkey: Address,
-    opts: {
-      mintAuthority?: Address;
-      supply?: bigint;
-      decimals?: number;
-      freezeAuthority?: Address;
-    }
-  ): void {
-    const enc = (a: Address) => new Uint8Array(addressEncoder.encode(a));
-    const data = packMint({
-      mintAuthority: opts.mintAuthority ? enc(opts.mintAuthority) : undefined,
-      supply: opts.supply,
-      decimals: opts.decimals,
-      freezeAuthority: opts.freezeAuthority ? enc(opts.freezeAuthority) : undefined,
-    });
-    this.check(
-      ffi.quasar_svm_set_account(
-        this.ptr,
-        Buffer.from(enc(pubkey)),
-        Buffer.from(enc(address(SPL_TOKEN_PROGRAM_ID))),
-        rentMinimumBalance(MINT_LEN),
-        data,
-        MINT_LEN,
-        false
-      )
-    );
+  addMintAccount(pubkey: Address, opts: MintOpts): void {
+    this.addMintAccountWithProgram(pubkey, opts, SPL_TOKEN_PROGRAM_ID);
+  }
+
+  /** Store a pre-initialized Token-2022 mint account. */
+  addMintAccount2022(pubkey: Address, opts: MintOpts): void {
+    this.addMintAccountWithProgram(pubkey, opts, SPL_TOKEN_2022_PROGRAM_ID);
   }
 
   /** Store a pre-initialized SPL Token token account. */
-  addTokenAccount(
-    pubkey: Address,
-    opts: {
-      mint: Address;
-      owner: Address;
-      amount: bigint;
-      delegate?: Address;
-      state?: TokenAccountState;
-      isNative?: bigint;
-      delegatedAmount?: bigint;
-      closeAuthority?: Address;
-    }
-  ): void {
-    const enc = (a: Address) => new Uint8Array(addressEncoder.encode(a));
-    const data = packTokenAccount({
-      mint: enc(opts.mint),
-      owner: enc(opts.owner),
-      amount: opts.amount,
-      delegate: opts.delegate ? enc(opts.delegate) : undefined,
-      state: opts.state,
-      isNative: opts.isNative,
-      delegatedAmount: opts.delegatedAmount,
-      closeAuthority: opts.closeAuthority ? enc(opts.closeAuthority) : undefined,
-    });
-    this.check(
-      ffi.quasar_svm_set_account(
-        this.ptr,
-        Buffer.from(enc(pubkey)),
-        Buffer.from(enc(address(SPL_TOKEN_PROGRAM_ID))),
-        rentMinimumBalance(TOKEN_ACCOUNT_LEN),
-        data,
-        TOKEN_ACCOUNT_LEN,
-        false
-      )
-    );
+  addTokenAccount(pubkey: Address, opts: TokenAccountOpts): void {
+    this.addTokenAccountWithProgram(pubkey, opts, SPL_TOKEN_PROGRAM_ID);
+  }
+
+  /** Store a pre-initialized Token-2022 token account. */
+  addTokenAccount2022(pubkey: Address, opts: TokenAccountOpts): void {
+    this.addTokenAccountWithProgram(pubkey, opts, SPL_TOKEN_2022_PROGRAM_ID);
   }
 
   /** Store an account in the SVM's persistent account database. */
@@ -322,6 +292,44 @@ export class QuasarSvm {
   }
 
   // ---------- internal ----------
+
+  private enc(a: Address): Uint8Array {
+    return new Uint8Array(addressEncoder.encode(a));
+  }
+
+  private addMintAccountWithProgram(pubkey: Address, opts: MintOpts, programId: string): void {
+    const data = packMint({
+      mintAuthority: opts.mintAuthority ? this.enc(opts.mintAuthority) : undefined,
+      supply: opts.supply,
+      decimals: opts.decimals,
+      freezeAuthority: opts.freezeAuthority ? this.enc(opts.freezeAuthority) : undefined,
+    });
+    this.check(
+      ffi.quasar_svm_set_account(
+        this.ptr, Buffer.from(this.enc(pubkey)), Buffer.from(this.enc(address(programId))),
+        rentMinimumBalance(MINT_LEN), data, MINT_LEN, false
+      )
+    );
+  }
+
+  private addTokenAccountWithProgram(pubkey: Address, opts: TokenAccountOpts, programId: string): void {
+    const data = packTokenAccount({
+      mint: this.enc(opts.mint),
+      owner: this.enc(opts.owner),
+      amount: opts.amount,
+      delegate: opts.delegate ? this.enc(opts.delegate) : undefined,
+      state: opts.state,
+      isNative: opts.isNative,
+      delegatedAmount: opts.delegatedAmount,
+      closeAuthority: opts.closeAuthority ? this.enc(opts.closeAuthority) : undefined,
+    });
+    this.check(
+      ffi.quasar_svm_set_account(
+        this.ptr, Buffer.from(this.enc(pubkey)), Buffer.from(this.enc(address(programId))),
+        rentMinimumBalance(TOKEN_ACCOUNT_LEN), data, TOKEN_ACCOUNT_LEN, false
+      )
+    );
+  }
 
   private check(code: number): void {
     if (code !== 0) {
