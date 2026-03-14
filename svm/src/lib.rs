@@ -91,15 +91,25 @@ impl QuasarSvm {
 }
 
 // ---------------------------------------------------------------------------
+// ExecutionStatus
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutionStatus {
+    Success,
+    Err(ProgramError),
+}
+
+// ---------------------------------------------------------------------------
 // ExecutionResult
 // ---------------------------------------------------------------------------
 
 impl ExecutionResult {
-    /// `0` on success, or the error code from the failed instruction.
-    pub fn status(&self) -> i32 {
+    /// Returns `ExecutionStatus::Success` or `ExecutionStatus::Err(ProgramError)`.
+    pub fn status(&self) -> ExecutionStatus {
         match &self.raw_result {
-            Ok(()) => 0,
-            Err(e) => instruction_error_to_code(e),
+            Ok(()) => ExecutionStatus::Success,
+            Err(e) => ExecutionStatus::Err(ProgramError::from(e.clone())),
         }
     }
 
@@ -109,14 +119,6 @@ impl ExecutionResult {
 
     pub fn is_err(&self) -> bool {
         self.raw_result.is_err()
-    }
-
-    /// Convert the raw result into a typed `ProgramError`.
-    pub fn error(&self) -> Option<ProgramError> {
-        self.raw_result
-            .as_ref()
-            .err()
-            .map(|e| ProgramError::from(e.clone()))
     }
 
     /// Panics with the error and program logs if execution failed.
@@ -155,26 +157,5 @@ impl ExecutionResult {
                     .join("\n")
             )
         }
-    }
-}
-
-/// Map an `InstructionError` to a numeric status code.
-/// `Custom(n)` → `n as i32`, known variants → negative codes, unknown → `-1`.
-fn instruction_error_to_code(err: &InstructionError) -> i32 {
-    match err {
-        InstructionError::Custom(n) => *n as i32,
-        InstructionError::InvalidArgument => -2,
-        InstructionError::InvalidInstructionData => -3,
-        InstructionError::InvalidAccountData => -4,
-        InstructionError::AccountDataTooSmall => -5,
-        InstructionError::InsufficientFunds => -6,
-        InstructionError::IncorrectProgramId => -7,
-        InstructionError::MissingRequiredSignature => -8,
-        InstructionError::AccountAlreadyInitialized => -9,
-        InstructionError::UninitializedAccount => -10,
-        InstructionError::MissingAccount => -11,
-        InstructionError::ComputationalBudgetExceeded => -12,
-        InstructionError::ArithmeticOverflow => -13,
-        _ => -1,
     }
 }
