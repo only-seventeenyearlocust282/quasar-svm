@@ -77,6 +77,12 @@ impl QuasarSvm {
         )
     }
 
+    /// Pre-populate an account in the SVM's account database.
+    pub fn with_account(mut self, pubkey: Pubkey, account: Account) -> Self {
+        self.set_account(pubkey, account);
+        self
+    }
+
     /// Set the clock slot (convenience for `sysvars.warp_to_slot`).
     pub fn with_slot(mut self, slot: u64) -> Self {
         self.sysvars.warp_to_slot(slot);
