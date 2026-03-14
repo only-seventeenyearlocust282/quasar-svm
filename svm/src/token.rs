@@ -91,17 +91,12 @@ pub struct Token {
     pub close_authority: Option<Pubkey>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TokenAccountState {
     Uninitialized = 0,
+    #[default]
     Initialized = 1,
     Frozen = 2,
-}
-
-impl Default for TokenAccountState {
-    fn default() -> Self {
-        Self::Initialized
-    }
 }
 
 impl Default for Token {

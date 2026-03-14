@@ -113,7 +113,7 @@ impl QuasarSvm {
             lamports: new_lamports,
             data: existing.map_or_else(Vec::new, |a| a.data.clone()),
             owner: existing.map_or(solana_sdk_ids::system_program::ID, |a| a.owner),
-            executable: existing.map_or(false, |a| a.executable),
+            executable: existing.is_some_and(|a| a.executable),
             rent_epoch: 0,
         };
         self.accounts.insert(*pubkey, account);
