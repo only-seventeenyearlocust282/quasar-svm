@@ -1,3 +1,9 @@
 [workspace]
 members = ["svm", "ffi"]
 resolver = "2"
+exclude = [
+    "bindings",
+    "npm",
+    "include",
+    "programs",
+]
