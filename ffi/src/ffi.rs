@@ -253,6 +253,132 @@ pub extern "C" fn quasar_svm_get_account(
     }
 }
 
+/// Give lamports to an account, creating it if needed (system program owned).
+#[unsafe(no_mangle)]
+pub extern "C" fn quasar_svm_airdrop(
+    svm: *mut QuasarSvm,
+    pubkey: *const [u8; 32],
+    lamports: u64,
+) -> i32 {
+    clear_last_error();
+    if svm.is_null() || pubkey.is_null() {
+        set_last_error("Null pointer argument");
+        return QUASAR_ERR_NULL_POINTER;
+    }
+    let svm = unsafe { &mut *svm };
+    let pk = solana_pubkey::Pubkey::new_from_array(unsafe { *pubkey });
+    svm.airdrop(&pk, lamports);
+    QUASAR_OK
+}
+
+/// Create a rent-exempt account with the given space and owner.
+#[unsafe(no_mangle)]
+pub extern "C" fn quasar_svm_create_account(
+    svm: *mut QuasarSvm,
+    pubkey: *const [u8; 32],
+    space: u64,
+    owner: *const [u8; 32],
+) -> i32 {
+    clear_last_error();
+    if svm.is_null() || pubkey.is_null() || owner.is_null() {
+        set_last_error("Null pointer argument");
+        return QUASAR_ERR_NULL_POINTER;
+    }
+    let svm = unsafe { &mut *svm };
+    let pk = solana_pubkey::Pubkey::new_from_array(unsafe { *pubkey });
+    let owner_pk = solana_pubkey::Pubkey::new_from_array(unsafe { *owner });
+    svm.create_account(&pk, space as usize, &owner_pk);
+    QUASAR_OK
+}
+
+/// Execute a transaction without committing state changes.
+#[unsafe(no_mangle)]
+pub extern "C" fn quasar_svm_simulate_transaction(
+    svm: *mut QuasarSvm,
+    instructions: *const u8,
+    instructions_len: u64,
+    accounts: *const u8,
+    accounts_len: u64,
+    result_out: *mut *mut u8,
+    result_len_out: *mut u64,
+) -> i32 {
+    clear_last_error();
+    if svm.is_null()
+        || instructions.is_null()
+        || accounts.is_null()
+        || result_out.is_null()
+        || result_len_out.is_null()
+    {
+        set_last_error("Null pointer argument");
+        return QUASAR_ERR_NULL_POINTER;
+    }
+    match std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let svm = unsafe { &mut *svm };
+        let ix_bytes = unsafe { slice::from_raw_parts(instructions, instructions_len as usize) };
+        let acct_bytes = unsafe { slice::from_raw_parts(accounts, accounts_len as usize) };
+
+        let ixs = match wire::deserialize_instructions(ix_bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                set_last_error(format!("Invalid instructions data: {e}"));
+                return QUASAR_ERR_EXECUTION;
+            }
+        };
+        let accts = match wire::deserialize_accounts(acct_bytes) {
+            Ok(a) => a,
+            Err(e) => {
+                set_last_error(format!("Invalid accounts data: {e}"));
+                return QUASAR_ERR_EXECUTION;
+            }
+        };
+
+        let exec_result = svm.simulate_transaction(&ixs, &accts);
+        write_result_out(result_out, result_len_out, &exec_result);
+        QUASAR_OK
+    })) {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("Panic during simulation");
+            QUASAR_ERR_INTERNAL
+        }
+    }
+}
+
+/// Save a snapshot of the current account state. Returns a handle (pointer).
+#[unsafe(no_mangle)]
+pub extern "C" fn quasar_svm_snapshot(svm: *const QuasarSvm) -> *mut std::ffi::c_void {
+    if svm.is_null() {
+        return std::ptr::null_mut();
+    }
+    let svm = unsafe { &*svm };
+    let snap = svm.snapshot();
+    Box::into_raw(Box::new(snap)) as *mut std::ffi::c_void
+}
+
+/// Restore account state from a snapshot. Consumes the snapshot handle.
+#[unsafe(no_mangle)]
+pub extern "C" fn quasar_svm_restore(svm: *mut QuasarSvm, snapshot: *mut std::ffi::c_void) -> i32 {
+    clear_last_error();
+    if svm.is_null() || snapshot.is_null() {
+        set_last_error("Null pointer argument");
+        return QUASAR_ERR_NULL_POINTER;
+    }
+    let svm = unsafe { &mut *svm };
+    let snap = unsafe { Box::from_raw(snapshot as *mut std::collections::HashMap<solana_pubkey::Pubkey, quasar_svm::Account>) };
+    svm.restore(*snap);
+    QUASAR_OK
+}
+
+/// Free a snapshot handle without restoring it.
+#[unsafe(no_mangle)]
+pub extern "C" fn quasar_svm_snapshot_free(snapshot: *mut std::ffi::c_void) {
+    if !snapshot.is_null() {
+        unsafe {
+            drop(Box::from_raw(snapshot as *mut std::collections::HashMap<solana_pubkey::Pubkey, quasar_svm::Account>));
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Execution — serialized bytes in, serialized bytes out
 // ---------------------------------------------------------------------------

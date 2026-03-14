@@ -83,4 +83,28 @@ export const quasar_result_free = lib.func(
   "void quasar_result_free(void *result, uint64_t result_len)"
 );
 
+export const quasar_svm_airdrop = lib.func(
+  "int32_t quasar_svm_airdrop(void *svm, const void *pubkey, uint64_t lamports)"
+);
+
+export const quasar_svm_create_account = lib.func(
+  "int32_t quasar_svm_create_account(void *svm, const void *pubkey, uint64_t space, const void *owner)"
+);
+
+export const quasar_svm_simulate_transaction = lib.func(
+  "int32_t quasar_svm_simulate_transaction(void *svm, const void *instructions, uint64_t instructions_len, const void *accounts, uint64_t accounts_len, _Out_ void **result_out, _Out_ uint64_t *result_len_out)"
+);
+
+export const quasar_svm_snapshot = lib.func(
+  "void *quasar_svm_snapshot(const void *svm)"
+);
+
+export const quasar_svm_restore = lib.func(
+  "int32_t quasar_svm_restore(void *svm, void *snapshot)"
+);
+
+export const quasar_svm_snapshot_free = lib.func(
+  "void quasar_svm_snapshot_free(void *snapshot)"
+);
+
 export { koffi };

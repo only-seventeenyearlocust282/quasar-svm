@@ -76,6 +76,45 @@ int32_t quasar_svm_get_account(const QuasarSvm *svm,
                                uint64_t *result_len_out);
 
 /**
+ * Give lamports to an account, creating it if needed (system program owned).
+ */
+int32_t quasar_svm_airdrop(QuasarSvm *svm, const uint8_t (*pubkey)[32], uint64_t lamports);
+
+/**
+ * Create a rent-exempt account with the given space and owner.
+ */
+int32_t quasar_svm_create_account(QuasarSvm *svm,
+                                  const uint8_t (*pubkey)[32],
+                                  uint64_t space,
+                                  const uint8_t (*owner)[32]);
+
+/**
+ * Execute a transaction without committing state changes.
+ */
+int32_t quasar_svm_simulate_transaction(QuasarSvm *svm,
+                                        const uint8_t *instructions,
+                                        uint64_t instructions_len,
+                                        const uint8_t *accounts,
+                                        uint64_t accounts_len,
+                                        uint8_t **result_out,
+                                        uint64_t *result_len_out);
+
+/**
+ * Save a snapshot of the current account state. Returns a handle (pointer).
+ */
+void *quasar_svm_snapshot(const QuasarSvm *svm);
+
+/**
+ * Restore account state from a snapshot. Consumes the snapshot handle.
+ */
+int32_t quasar_svm_restore(QuasarSvm *svm, void *snapshot);
+
+/**
+ * Free a snapshot handle without restoring it.
+ */
+void quasar_svm_snapshot_free(void *snapshot);
+
+/**
  * Execute one or more instructions with shared, persisted account state.
  *
  * `instructions` / `instructions_len`: count-prefixed serialized instructions.

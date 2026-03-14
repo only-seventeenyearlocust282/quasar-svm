@@ -104,6 +104,88 @@ impl QuasarSvm {
         self.accounts.get(pubkey)
     }
 
+    /// Give lamports to an account, creating it if it doesn't exist.
+    /// The account is owned by the system program.
+    pub fn airdrop(&mut self, pubkey: &Pubkey, lamports: u64) {
+        let existing = self.accounts.get(pubkey);
+        let new_lamports = existing.map_or(lamports, |a| a.lamports + lamports);
+        let account = Account {
+            lamports: new_lamports,
+            data: existing.map_or_else(Vec::new, |a| a.data.clone()),
+            owner: existing.map_or(solana_sdk_ids::system_program::ID, |a| a.owner),
+            executable: existing.map_or(false, |a| a.executable),
+            rent_epoch: 0,
+        };
+        self.accounts.insert(*pubkey, account);
+    }
+
+    /// Create a rent-exempt account with the given space and owner.
+    pub fn create_account(&mut self, pubkey: &Pubkey, space: usize, owner: &Pubkey) {
+        let lamports = self.sysvars.rent.minimum_balance(space);
+        let account = Account {
+            lamports,
+            data: vec![0u8; space],
+            owner: *owner,
+            executable: false,
+            rent_epoch: 0,
+        };
+        self.accounts.insert(*pubkey, account);
+    }
+
+    /// Execute a transaction without committing any state changes.
+    pub fn simulate_transaction(
+        &mut self,
+        instructions: &[Instruction],
+        accounts: &[(Pubkey, Account)],
+    ) -> ExecutionResult {
+        self.reset_logger();
+
+        let merged = self.merge_accounts(accounts);
+
+        let (sanitized_message, transaction_accounts) =
+            self.compile_accounts(instructions, &merged);
+
+        let mut transaction_context = TransactionContext::new(
+            transaction_accounts,
+            self.sysvars.rent.clone(),
+            self.compute_budget.max_instruction_stack_depth,
+            self.compute_budget.max_instruction_trace_length,
+        );
+
+        let sysvar_cache = self.sysvars.setup_sysvar_cache(&merged);
+
+        let (compute_units_consumed, execution_time_us, raw_result, return_data) =
+            self.process_message(&sanitized_message, &mut transaction_context, &sysvar_cache);
+
+        // Read resulting accounts but DON'T commit them
+        let resulting_accounts = if raw_result.is_ok() {
+            Self::deconstruct_resulting_accounts(&transaction_context, &merged)
+        } else {
+            merged
+        };
+
+        let logs = self.drain_logs();
+
+        ExecutionResult {
+            compute_units_consumed,
+            execution_time_us,
+            raw_result,
+            return_data,
+            resulting_accounts,
+            logs,
+        }
+    }
+
+    /// Save a snapshot of the current account state.
+    pub fn snapshot(&self) -> HashMap<Pubkey, Account> {
+        self.accounts.clone()
+    }
+
+    /// Restore account state from a previous snapshot.
+    pub fn restore(&mut self, snapshot: HashMap<Pubkey, Account>) {
+        self.accounts = snapshot;
+    }
+
     /// Merge explicit accounts with the stored account database.
     /// Explicit accounts take priority over stored ones.
     fn merge_accounts(&self, accounts: &[(Pubkey, Account)]) -> Vec<(Pubkey, Account)> {

@@ -39,3 +39,7 @@ solana-sysvar-id = "3.0"
 solana-transaction-error = "3.0"
 
 bincode = "1.3"
+borsh = { version = "1", optional = true }
+
+[features]
+borsh = ["dep:borsh"]

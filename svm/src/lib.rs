@@ -18,6 +18,7 @@ pub use crate::error::ProgramError;
 pub use crate::program_cache::loader_keys;
 pub use crate::svm::{ExecutionResult, QuasarSvm};
 pub use crate::sysvars::Sysvars;
+pub use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // Bundled SPL programs
@@ -88,6 +89,18 @@ impl QuasarSvm {
         self.sysvars.warp_to_slot(slot);
         self
     }
+
+    /// Give lamports to an account (builder-style).
+    pub fn with_airdrop(mut self, pubkey: &Pubkey, lamports: u64) -> Self {
+        self.airdrop(pubkey, lamports);
+        self
+    }
+
+    /// Create a rent-exempt account (builder-style).
+    pub fn with_create_account(mut self, pubkey: &Pubkey, space: usize, owner: &Pubkey) -> Self {
+        self.create_account(pubkey, space, owner);
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +154,30 @@ impl ExecutionResult {
             .iter()
             .find(|(k, _)| k == pubkey)
             .map(|(_, a)| a)
+    }
+
+    /// Print transaction logs to stdout, nicely formatted.
+    pub fn print_logs(&self) {
+        for log in &self.logs {
+            println!("  {log}");
+        }
+    }
+
+    /// Deserialize a resulting account's data using borsh.
+    #[cfg(feature = "borsh")]
+    pub fn account_data<T: borsh::BorshDeserialize>(&self, pubkey: &Pubkey) -> Option<T> {
+        self.account(pubkey)
+            .and_then(|a| T::try_from_slice(&a.data).ok())
+    }
+
+    /// Get lamports of a resulting account. Returns 0 if not found.
+    pub fn lamports(&self, pubkey: &Pubkey) -> u64 {
+        self.account(pubkey).map_or(0, |a| a.lamports)
+    }
+
+    /// Get account data bytes of a resulting account.
+    pub fn data(&self, pubkey: &Pubkey) -> Option<&[u8]> {
+        self.account(pubkey).map(|a| a.data.as_slice())
     }
 
     fn format_error(&self, e: &InstructionError) -> String {

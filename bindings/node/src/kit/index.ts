@@ -79,6 +79,29 @@ export class QuasarSvm {
     return this;
   }
 
+  /** Give lamports to an account, creating it if it doesn't exist. */
+  airdrop(pubkey: Address, amount: bigint): void {
+    this.check(
+      ffi.quasar_svm_airdrop(
+        this.ptr,
+        Buffer.from(addressEncoder.encode(pubkey)),
+        amount
+      )
+    );
+  }
+
+  /** Create a rent-exempt account with the given space and owner. */
+  createAccount(pubkey: Address, space: bigint, owner: Address): void {
+    this.check(
+      ffi.quasar_svm_create_account(
+        this.ptr,
+        Buffer.from(addressEncoder.encode(pubkey)),
+        space,
+        Buffer.from(addressEncoder.encode(owner))
+      )
+    );
+  }
+
   /** Store an account in the SVM's persistent account database. */
   setAccount(account: SvmAccount): void {
     const dataBuf = account.data.length > 0 ? Buffer.from(account.data) : null;
@@ -172,6 +195,35 @@ export class QuasarSvm {
 
   setComputeBudget(maxUnits: bigint): void {
     this.check(ffi.quasar_svm_set_compute_budget(this.ptr, maxUnits));
+  }
+
+  /** Execute a transaction without committing any state changes. */
+  simulateTransaction(
+    instructions: Instruction[],
+    accounts: SvmAccount[]
+  ): ExecutionResult<SvmAccount> {
+    return this.exec(
+      ffi.quasar_svm_simulate_transaction,
+      serializeInstructions(instructions),
+      serializeAccounts(accounts)
+    );
+  }
+
+  /** Save a snapshot of the current account state. */
+  snapshot(): unknown {
+    const handle = ffi.quasar_svm_snapshot(this.ptr);
+    if (!handle) throw new Error("Failed to create snapshot");
+    return handle;
+  }
+
+  /** Restore account state from a previous snapshot. */
+  restore(snap: unknown): void {
+    this.check(ffi.quasar_svm_restore(this.ptr, snap));
+  }
+
+  /** Free a snapshot without restoring it. */
+  snapshotFree(snap: unknown): void {
+    ffi.quasar_svm_snapshot_free(snap);
   }
 
   processInstruction(

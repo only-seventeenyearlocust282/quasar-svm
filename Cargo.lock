@@ -1501,6 +1501,7 @@ dependencies = [
  "agave-feature-set",
  "agave-syscalls",
  "bincode",
+ "borsh",
  "solana-account",
  "solana-bpf-loader-program",
  "solana-clock",

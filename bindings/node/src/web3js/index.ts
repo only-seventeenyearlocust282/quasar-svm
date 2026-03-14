@@ -115,6 +115,47 @@ export class QuasarSvm {
     return { accountId, accountInfo: { owner, lamports, data, executable } };
   }
 
+  /** Give lamports to an account, creating it if it doesn't exist. */
+  airdrop(pubkey: PublicKey, lamports: bigint): void {
+    this.check(ffi.quasar_svm_airdrop(this.ptr, pubkey.toBuffer(), lamports));
+  }
+
+  /** Create a rent-exempt account with the given space and owner. */
+  createAccount(pubkey: PublicKey, space: bigint, owner: PublicKey): void {
+    this.check(
+      ffi.quasar_svm_create_account(this.ptr, pubkey.toBuffer(), space, owner.toBuffer())
+    );
+  }
+
+  /** Execute a transaction without committing any state changes. */
+  simulateTransaction(
+    instructions: TransactionInstruction[],
+    accounts: KeyedAccountInfo[]
+  ): ExecutionResult<KeyedAccountInfo> {
+    return this.exec(
+      ffi.quasar_svm_simulate_transaction,
+      serializeInstructions(instructions),
+      serializeAccounts(accounts)
+    );
+  }
+
+  /** Save a snapshot of the current account state. */
+  snapshot(): unknown {
+    const handle = ffi.quasar_svm_snapshot(this.ptr);
+    if (!handle) throw new Error("Failed to create snapshot");
+    return handle;
+  }
+
+  /** Restore account state from a previous snapshot. */
+  restore(snap: unknown): void {
+    this.check(ffi.quasar_svm_restore(this.ptr, snap));
+  }
+
+  /** Free a snapshot without restoring it. */
+  snapshotFree(snap: unknown): void {
+    ffi.quasar_svm_snapshot_free(snap);
+  }
+
   setClock(opts: Clock): void {
     this.check(
       ffi.quasar_svm_set_clock(
