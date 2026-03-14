@@ -264,9 +264,9 @@ fn program_error_to_i32(err: &ProgramError) -> i32 {
     }
 }
 
-/// Serialize an `ExecutionResult` + logs into the wire format.
+/// Serialize an `ExecutionResult` into the wire format.
 /// Returns a boxed slice suitable for handing across FFI.
-pub fn serialize_result(result: &ExecutionResult, logs: Vec<String>) -> Box<[u8]> {
+pub fn serialize_result(result: &ExecutionResult) -> Box<[u8]> {
     let mut w = Writer::new();
 
     let (status, error_message) = match &result.raw_result {
@@ -299,8 +299,8 @@ pub fn serialize_result(result: &ExecutionResult, logs: Vec<String>) -> Box<[u8]
     }
 
     // Logs
-    w.write_u32(logs.len() as u32);
-    for log in &logs {
+    w.write_u32(result.logs.len() as u32);
+    for log in &result.logs {
         w.write_length_prefixed(log.as_bytes());
     }
 

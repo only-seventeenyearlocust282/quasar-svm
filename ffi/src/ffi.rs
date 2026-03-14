@@ -4,8 +4,8 @@ use std::slice;
 
 use crate::error::*;
 use crate::wire;
-use quasar_svm::QuasarSvm;
 use quasar_svm::loader_keys;
+use quasar_svm::QuasarSvm;
 
 // ---------------------------------------------------------------------------
 // Error query
@@ -226,8 +226,7 @@ pub extern "C" fn quasar_svm_process_instructions(
         };
 
         let exec_result = svm.process_instructions(&ixs, &accts);
-        let logs = svm.drain_logs();
-        write_result_out(result_out, result_len_out, &exec_result, logs);
+        write_result_out(result_out, result_len_out, &exec_result);
         QUASAR_OK
     })) {
         Ok(code) => code,
@@ -283,8 +282,7 @@ pub extern "C" fn quasar_svm_process_transaction(
         };
 
         let exec_result = svm.process_transaction(&ixs, &accts);
-        let logs = svm.drain_logs();
-        write_result_out(result_out, result_len_out, &exec_result, logs);
+        write_result_out(result_out, result_len_out, &exec_result);
         QUASAR_OK
     })) {
         Ok(code) => code,
@@ -319,9 +317,8 @@ fn write_result_out(
     result_out: *mut *mut u8,
     result_len_out: *mut u64,
     exec_result: &quasar_svm::ExecutionResult,
-    logs: Vec<String>,
 ) {
-    let serialized = wire::serialize_result(exec_result, logs);
+    let serialized = wire::serialize_result(exec_result);
     let len = serialized.len();
     let ptr = Box::into_raw(serialized) as *mut u8;
     unsafe {

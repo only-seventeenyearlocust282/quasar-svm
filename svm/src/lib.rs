@@ -1,3 +1,4 @@
+mod error;
 mod program_cache;
 mod svm;
 mod sysvars;
@@ -13,6 +14,7 @@ pub use solana_sdk_ids;
 /// Convenience alias so users can write `quasar_svm::system_program::ID`.
 pub use solana_sdk_ids::system_program;
 
+pub use crate::error::ProgramError;
 pub use crate::program_cache::loader_keys;
 pub use crate::svm::{ExecutionResult, QuasarSvm};
 pub use crate::sysvars::Sysvars;
@@ -97,17 +99,64 @@ impl ExecutionResult {
         self.raw_result.is_err()
     }
 
-    /// Unwrap the result, panicking with the error if execution failed.
-    pub fn unwrap(&self) {
-        if let Err(ref e) = self.raw_result {
-            panic!("execution failed: {e:?}");
+    /// The typed result: `Ok(())` on success, `Err(ProgramError)` on failure.
+    pub fn result(&self) -> Result<(), ProgramError> {
+        match &self.raw_result {
+            Ok(()) => Ok(()),
+            Err(e) => Err(ProgramError::from(e.clone())),
         }
     }
 
-    /// Unwrap with a custom message.
+    /// The error variant, if execution failed.
+    pub fn error(&self) -> Option<ProgramError> {
+        self.result().err()
+    }
+
+    /// Unwrap the result, panicking with the error and program logs if
+    /// execution failed.
+    pub fn unwrap(&self) {
+        if let Err(ref e) = self.raw_result {
+            let err = ProgramError::from(e.clone());
+            let logs = &self.logs;
+            if logs.is_empty() {
+                panic!("execution failed: {err}");
+            } else {
+                panic!(
+                    "execution failed: {err}\n\nProgram logs:\n{}",
+                    logs.iter()
+                        .map(|l| format!("  {l}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+            }
+        }
+    }
+
+    /// Unwrap with a custom message, including program logs on failure.
     pub fn expect(&self, msg: &str) {
         if let Err(ref e) = self.raw_result {
-            panic!("{msg}: {e:?}");
+            let err = ProgramError::from(e.clone());
+            let logs = &self.logs;
+            if logs.is_empty() {
+                panic!("{msg}: {err}");
+            } else {
+                panic!(
+                    "{msg}: {err}\n\nProgram logs:\n{}",
+                    logs.iter()
+                        .map(|l| format!("  {l}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+            }
+        }
+    }
+
+    /// Assert that execution failed with a specific error.
+    pub fn assert_error(&self, expected: ProgramError) {
+        match self.error() {
+            Some(ref actual) if *actual == expected => {}
+            Some(actual) => panic!("expected error {expected:?}, got {actual:?}"),
+            None => panic!("expected error {expected:?}, but execution succeeded"),
         }
     }
 

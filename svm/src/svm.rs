@@ -55,6 +55,7 @@ pub struct ExecutionResult {
     pub raw_result: Result<(), InstructionError>,
     pub return_data: Vec<u8>,
     pub resulting_accounts: Vec<(Pubkey, Account)>,
+    pub logs: Vec<String>,
 }
 
 pub struct QuasarSvm {
@@ -355,12 +356,15 @@ impl QuasarSvm {
             }
         }
 
+        let logs = self.drain_logs();
+
         ExecutionResult {
             compute_units_consumed: total_compute_units,
             execution_time_us: total_execution_time,
             raw_result: last_raw_result,
             return_data: last_return_data,
             resulting_accounts: current_accounts,
+            logs,
         }
     }
 
@@ -393,12 +397,15 @@ impl QuasarSvm {
             accounts.to_vec()
         };
 
+        let logs = self.drain_logs();
+
         ExecutionResult {
             compute_units_consumed,
             execution_time_us,
             raw_result,
             return_data,
             resulting_accounts,
+            logs,
         }
     }
 }
