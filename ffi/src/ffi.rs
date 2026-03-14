@@ -178,6 +178,82 @@ pub extern "C" fn quasar_svm_set_compute_budget(svm: *mut QuasarSvm, max_units: 
 }
 
 // ---------------------------------------------------------------------------
+// Account store
+// ---------------------------------------------------------------------------
+
+/// Store an account in the SVM's account database.
+/// The account is provided as raw fields (not wire-format).
+#[unsafe(no_mangle)]
+pub extern "C" fn quasar_svm_set_account(
+    svm: *mut QuasarSvm,
+    pubkey: *const [u8; 32],
+    owner: *const [u8; 32],
+    lamports: u64,
+    data: *const u8,
+    data_len: u64,
+    executable: bool,
+) -> i32 {
+    clear_last_error();
+    if svm.is_null() || pubkey.is_null() || owner.is_null() {
+        set_last_error("Null pointer argument");
+        return QUASAR_ERR_NULL_POINTER;
+    }
+    let svm = unsafe { &mut *svm };
+    let pk = solana_pubkey::Pubkey::new_from_array(unsafe { *pubkey });
+    let owner_pk = solana_pubkey::Pubkey::new_from_array(unsafe { *owner });
+    let account_data = if data.is_null() || data_len == 0 {
+        vec![]
+    } else {
+        unsafe { slice::from_raw_parts(data, data_len as usize) }.to_vec()
+    };
+    svm.set_account(
+        pk,
+        quasar_svm::Account {
+            lamports,
+            data: account_data,
+            owner: owner_pk,
+            executable,
+            rent_epoch: 0,
+        },
+    );
+    QUASAR_OK
+}
+
+/// Read an account from the SVM's account database.
+/// Returns serialized account data via out-pointers, or QUASAR_ERR_EXECUTION if not found.
+#[unsafe(no_mangle)]
+pub extern "C" fn quasar_svm_get_account(
+    svm: *const QuasarSvm,
+    pubkey: *const [u8; 32],
+    result_out: *mut *mut u8,
+    result_len_out: *mut u64,
+) -> i32 {
+    clear_last_error();
+    if svm.is_null() || pubkey.is_null() || result_out.is_null() || result_len_out.is_null() {
+        set_last_error("Null pointer argument");
+        return QUASAR_ERR_NULL_POINTER;
+    }
+    let svm = unsafe { &*svm };
+    let pk = solana_pubkey::Pubkey::new_from_array(unsafe { *pubkey });
+    match svm.get_account(&pk) {
+        Some(account) => {
+            let serialized = wire::serialize_single_account(&pk, account);
+            let len = serialized.len();
+            let ptr = Box::into_raw(serialized) as *mut u8;
+            unsafe {
+                *result_out = ptr;
+                *result_len_out = len as u64;
+            }
+            QUASAR_OK
+        }
+        None => {
+            set_last_error("Account not found");
+            QUASAR_ERR_EXECUTION
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Execution — serialized bytes in, serialized bytes out
 // ---------------------------------------------------------------------------
 
