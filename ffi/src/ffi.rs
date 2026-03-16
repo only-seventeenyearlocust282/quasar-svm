@@ -408,7 +408,7 @@ pub extern "C" fn quasar_svm_simulate_transaction(
             .map(|(pk, a)| SvmAccount::from_pair(pk, a))
             .collect();
 
-        let exec_result = svm.simulate_transaction(&ixs, &svm_accounts);
+        let exec_result = svm.simulate_instruction_chain(&ixs, &svm_accounts);
         write_result_out(result_out, result_len_out, &exec_result);
         QUASAR_OK
     })) {
@@ -469,7 +469,7 @@ pub extern "C" fn quasar_svm_process_transaction(
             .map(|(pk, a)| SvmAccount::from_pair(pk, a))
             .collect();
 
-        let exec_result = svm.process_transaction(&ixs, &svm_accounts);
+        let exec_result = svm.process_instruction_chain(&ixs, &svm_accounts);
         write_result_out(result_out, result_len_out, &exec_result);
         QUASAR_OK
     })) {

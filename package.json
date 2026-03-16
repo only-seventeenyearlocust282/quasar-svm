@@ -25,6 +25,8 @@
   "scripts": {
     "build": "tsc",
     "build:native": "cargo build --release && cp target/release/libquasar_svm.* . 2>/dev/null; cp target/release/quasar_svm.dll . 2>/dev/null; true",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepare": "tsc",
     "prepublishOnly": "npm run build"
   },
@@ -39,10 +41,10 @@
     "@blueshift-gg/quasar-svm-win32-x64-msvc": "0.1.4"
   },
   "peerDependencies": {
-    "@solana/web3.js": ">=2.0.0",
     "@solana/addresses": "^5.5.0",
     "@solana/instructions": "^5.5.0",
-    "@solana/rpc-types": "^6.2.0"
+    "@solana/rpc-types": "^6.2.0",
+    "@solana/web3.js": ">=2.0.0"
   },
   "peerDependenciesMeta": {
     "@solana/web3.js": {
@@ -59,12 +61,13 @@
     }
   },
   "devDependencies": {
-    "@solana/web3.js": "github:blueshift-gg/web3.js#v2",
     "@solana/addresses": "^5.5.0",
     "@solana/instructions": "^5.5.0",
     "@solana/rpc-types": "^6.2.0",
+    "@solana/web3.js": "github:blueshift-gg/web3.js#v2",
     "@types/node": "^22.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.0"
   },
   "engines": {
     "node": ">=18.0.0"

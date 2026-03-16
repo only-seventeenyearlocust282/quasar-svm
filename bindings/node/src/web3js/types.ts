@@ -27,7 +27,7 @@ export function toKeyedAccountInfo(account: SvmAccount): KeyedAccountInfo {
 export function fromKeyedAccountInfo(keyed: KeyedAccountInfo): SvmAccount {
   return {
     address: keyed.accountId,
-    lamports: keyed.accountInfo.lamports,
+    lamports: BigInt(keyed.accountInfo.lamports),
     data: Buffer.isBuffer(keyed.accountInfo.data)
       ? keyed.accountInfo.data
       : Buffer.from(keyed.accountInfo.data),

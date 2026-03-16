@@ -152,6 +152,7 @@ export function deserializeResult(data: Buffer): {
     const post = readAccountFields(data, o);
     o = post.offset;
     modifiedAccounts.push({
+      address: diffAddress,
       pre: { address: diffAddress, owner: pre.owner, lamports: pre.lamports, data: pre.data, executable: pre.executable },
       post: { address: diffAddress, owner: post.owner, lamports: post.lamports, data: post.data, executable: post.executable },
     });

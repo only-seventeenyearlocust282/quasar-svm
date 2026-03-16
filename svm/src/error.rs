@@ -7,7 +7,7 @@ use solana_instruction_error::InstructionError;
 /// assertions in tests:
 ///
 /// ```ignore
-/// let result = svm.process_transaction(&[ix], &accounts);
+/// let result = svm.process_instruction(&ix, &accounts);
 /// assert_eq!(result.error(), Some(ProgramError::InvalidAccountData));
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]

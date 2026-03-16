@@ -169,74 +169,55 @@ impl QuasarSvm {
         self.sysvars.clock.unix_timestamp = timestamp;
     }
 
-    /// Execute a transaction without committing any state changes.
-    pub fn simulate_transaction(
+    /// Execute a single instruction without committing any state changes.
+    pub fn simulate_instruction(
         &mut self,
-        instructions: &[Instruction],
+        instruction: &Instruction,
         accounts: &[SvmAccount],
     ) -> ExecutionResult {
-        self.reset_logger();
-
-        let pairs: Vec<(Pubkey, Account)> = accounts.iter().map(|a| a.to_pair()).collect();
-        let merged = self.merge_accounts(&pairs);
-
-        // Snapshot pre-execution state for diffing
-        let pre_accounts: HashMap<Pubkey, SvmAccount> = merged
-            .iter()
-            .map(|(k, v)| (*k, SvmAccount::from_pair(*k, v.clone())))
-            .collect();
-
-        let (sanitized_message, transaction_accounts) =
-            self.compile_accounts(instructions, &merged);
-
-        let mut transaction_context = TransactionContext::new(
-            transaction_accounts,
-            self.sysvars.rent.clone(),
-            self.compute_budget.max_instruction_stack_depth,
-            self.compute_budget.max_instruction_trace_length,
-        );
-
-        let sysvar_cache = self.sysvars.setup_sysvar_cache(&merged);
-
-        let (compute_units_consumed, execution_time_us, raw_result, return_data) =
-            self.process_message(&sanitized_message, &mut transaction_context, &sysvar_cache);
-
-        // Read resulting accounts but DON'T commit them
-        let resulting_pairs = if raw_result.is_ok() {
-            Self::deconstruct_resulting_accounts(&transaction_context, &merged)
-        } else {
-            merged
-        };
-
-        let result_accounts = Self::pairs_to_svm_accounts(&resulting_pairs);
-        let modified_accounts = Self::compute_diffs(&pre_accounts, &resulting_pairs);
-
-        let logs = self.drain_logs();
-
-        ExecutionResult {
-            compute_units_consumed,
-            execution_time_us,
-            raw_result,
-            return_data,
-            accounts: result_accounts,
-            modified_accounts,
-            logs,
-        }
+        self.execute_inner(std::slice::from_ref(instruction), accounts, false)
     }
 
-    /// Execute multiple instructions as a single atomic transaction.
-    /// Accounts from the SVM's database are merged in automatically.
-    pub fn process_transaction(
+    /// Execute instructions without committing any state changes.
+    pub fn simulate_instruction_chain(
         &mut self,
         instructions: &[Instruction],
         accounts: &[SvmAccount],
+    ) -> ExecutionResult {
+        self.execute_inner(instructions, accounts, false)
+    }
+
+    /// Execute a single instruction atomically.
+    /// Accounts from the SVM's database are merged in automatically.
+    pub fn process_instruction(
+        &mut self,
+        instruction: &Instruction,
+        accounts: &[SvmAccount],
+    ) -> ExecutionResult {
+        self.execute_inner(std::slice::from_ref(instruction), accounts, true)
+    }
+
+    /// Execute multiple instructions as a single atomic chain.
+    /// Accounts from the SVM's database are merged in automatically.
+    pub fn process_instruction_chain(
+        &mut self,
+        instructions: &[Instruction],
+        accounts: &[SvmAccount],
+    ) -> ExecutionResult {
+        self.execute_inner(instructions, accounts, true)
+    }
+
+    fn execute_inner(
+        &mut self,
+        instructions: &[Instruction],
+        accounts: &[SvmAccount],
+        commit: bool,
     ) -> ExecutionResult {
         self.reset_logger();
 
         let pairs: Vec<(Pubkey, Account)> = accounts.iter().map(|a| a.to_pair()).collect();
         let merged = self.merge_accounts(&pairs);
 
-        // Snapshot pre-execution state for diffing
         let pre_accounts: HashMap<Pubkey, SvmAccount> = merged
             .iter()
             .map(|(k, v)| (*k, SvmAccount::from_pair(*k, v.clone())))
@@ -259,7 +240,9 @@ impl QuasarSvm {
 
         let resulting_pairs = if raw_result.is_ok() {
             let result = Self::deconstruct_resulting_accounts(&transaction_context, &merged);
-            self.commit_accounts(&result);
+            if commit {
+                self.commit_accounts(&result);
+            }
             result
         } else {
             merged
@@ -306,7 +289,7 @@ impl QuasarSvm {
         self.logger = Some(LogCollector::new_ref());
     }
 
-    pub fn drain_logs(&self) -> Vec<String> {
+    pub(crate) fn drain_logs(&self) -> Vec<String> {
         self.logger
             .as_ref()
             .map(|rc| rc.borrow().get_recorded_content().to_vec())

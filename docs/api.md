@@ -14,7 +14,7 @@ let svm = QuasarSvm::new();
 const vm = new QuasarSvm();
 ```
 
-> **Important:** In TypeScript, always call `vm.free()` when done to release native resources. Failing to do so will leak memory.
+> Native memory is freed automatically by the GC. For deterministic cleanup, use `using vm = new QuasarSvm()` or call `vm.free()`.
 
 ### Loading Programs
 
@@ -56,20 +56,29 @@ const vm = new QuasarSvm()
   .addAssociatedTokenProgram();
 ```
 
-### Executing Transactions
+### Executing Instructions
 
-Two execution modes:
+Four execution methods — single or chain, process or simulate:
 
 | Method | Behavior |
 |--------|----------|
-| `process_transaction` / `processTransaction` | Execute all instructions as one atomic transaction. State rolls back on failure. |
-| `simulate_transaction` / `simulateTransaction` | Execute without committing any state changes. Read-only. |
+| `process_instruction` / `processInstruction` | Execute one instruction atomically. Commits state on success. |
+| `process_instruction_chain` / `processInstructionChain` | Execute multiple instructions as one atomic chain. State rolls back on failure. |
+| `simulate_instruction` / `simulateInstruction` | Simulate one instruction without committing state changes. |
+| `simulate_instruction_chain` / `simulateInstructionChain` | Simulate multiple instructions without committing state changes. |
 
 **Rust:**
 
 ```rust
-let result = svm.process_transaction(&[ix1, ix2], &accounts);
-let result = svm.simulate_transaction(&[ix], &accounts);
+// Single instruction
+let result = svm.process_instruction(&ix, &accounts);
+
+// Multiple instructions — atomic
+let result = svm.process_instruction_chain(&[ix1, ix2], &accounts);
+
+// Read-only simulation
+let result = svm.simulate_instruction(&ix, &accounts);
+let result = svm.simulate_instruction_chain(&[ix1, ix2], &accounts);
 ```
 
 Accounts are `&[SvmAccount]` — a slice of `SvmAccount` structs.
@@ -78,27 +87,28 @@ Accounts are `&[SvmAccount]` — a slice of `SvmAccount` structs.
 
 ```ts
 // Single instruction
-const result = vm.processTransaction(ix, accounts);
+const result = vm.processInstruction(ix, accounts);
 
-// Multiple instructions
-const result = vm.processTransaction([ix1, ix2], accounts);
+// Multiple instructions — atomic
+const result = vm.processInstructionChain([ix1, ix2], accounts);
 
 // Read-only simulation
-const result = vm.simulateTransaction(ix, accounts);
+const result = vm.simulateInstruction(ix, accounts);
+const result = vm.simulateInstructionChain([ix1, ix2], accounts);
 ```
 
 **TypeScript (kit):**
 
 ```ts
-const result = vm.processTransaction(ix, accounts);
-const result = vm.processTransaction([ix1, ix2], accounts);
-const result = vm.simulateTransaction(ix, accounts);
+const result = vm.processInstruction(ix, accounts);
+const result = vm.processInstructionChain([ix1, ix2], accounts);
+const result = vm.simulateInstruction(ix, accounts);
 ```
 
 Accounts are always `SvmAccount[]`:
 
 ```ts
-vm.processTransaction(ix, [acct1, acct2, acct3]);
+vm.processInstruction(ix, [acct1, acct2, acct3]);
 ```
 
 ### Account Store
@@ -188,13 +198,23 @@ vm.setComputeBudget(200_000n);
 
 ### Cleanup
 
-TypeScript only — release native resources when done:
+Native memory is freed automatically by the garbage collector — no manual cleanup required in most cases.
+
+For deterministic cleanup (tight loops, benchmarks), use `using` or call `free()`:
 
 ```ts
+// Automatic — GC handles it
+const vm = new QuasarSvm().addTokenProgram();
+
+// Deterministic — freed when scope exits
+{
+  using vm = new QuasarSvm().addTokenProgram();
+} // freed here
+
+// Manual — explicit control
+const vm = new QuasarSvm();
 vm.free();
 ```
-
-This **must** be called when you are finished with the VM. Omitting it will leak native memory.
 
 ## ExecutionResult
 

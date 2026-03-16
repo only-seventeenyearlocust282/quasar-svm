@@ -38,7 +38,7 @@ let ix = token_transfer(&alice.address, &bob.address, &authority, 1_000, &SPL_TO
 
 let mut svm = QuasarSvm::new().with_token_program();
 
-let result = svm.process_transaction(&[ix], &[mint, alice, bob]);
+let result = svm.process_instruction(&ix, &[mint, alice, bob]);
 
 result.assert_success();
 assert_eq!(result.token_balance(&bob.address), Some(1_000));
@@ -64,12 +64,10 @@ const bob   = createAssociatedTokenAccount(Keypair.generate().publicKey, mint.ad
 
 const ix = tokenTransfer(alice.address, bob.address, authority, 1_000n);
 
-const result = vm.processTransaction(ix, [mint, alice, bob]);
+const result = vm.processInstruction(ix, [mint, alice, bob]);
 
 result.assertSuccess();
 console.log(result.tokenBalance(bob.address)); // 1000n
-
-vm.free();
 ```
 
 ### TypeScript (kit)
@@ -96,15 +94,13 @@ const bob   = await createAssociatedTokenAccount(
 
 const ix = tokenTransfer(alice.address, bob.address, authority, 1_000n);
 
-const result = vm.processTransaction(ix, [mint, alice, bob]);
+const result = vm.processInstruction(ix, [mint, alice, bob]);
 
 result.assertSuccess();
 console.log(result.tokenBalance(bob.address)); // 1000n
-
-vm.free();
 ```
 
-> **Important:** Always call `vm.free()` in TypeScript when done to release native resources.
+> Native memory is freed automatically by the GC. For deterministic cleanup in tight loops, use `using vm = new QuasarSvm()` or call `vm.free()`.
 
 ## Documentation
 

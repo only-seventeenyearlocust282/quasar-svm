@@ -134,6 +134,12 @@ impl QuasarSvm {
         self
     }
 
+    /// Set the compute budget (builder-style).
+    pub fn with_compute_budget(mut self, max_units: u64) -> Self {
+        self.compute_budget.compute_unit_limit = max_units;
+        self
+    }
+
     /// Give lamports to an account (builder-style).
     pub fn with_airdrop(mut self, pubkey: &Pubkey, lamports: u64) -> Self {
         self.airdrop(pubkey, lamports);

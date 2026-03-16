@@ -164,6 +164,7 @@ export function deserializeResult(data: Buffer): {
     const post = readAccountFields(data, o);
     o = post.offset;
     modifiedAccounts.push({
+      address: diffAddress as SvmAccount["address"],
       pre: {
         address: diffAddress as SvmAccount["address"],
         owner: pre.owner as SvmAccount["owner"],

@@ -337,7 +337,7 @@ let ix = token_transfer(&alice.address, &bob.address, &authority, 1_000, &SPL_TO
 
 let mut svm = QuasarSvm::new().with_token_program();
 
-let result = svm.process_transaction(&[ix], &[mint, alice, bob]);
+let result = svm.process_instruction(&ix, &[mint, alice, bob]);
 
 result.assert_success();
 assert_eq!(result.token_balance(&bob.address), Some(1_000));
@@ -370,7 +370,7 @@ const bob   = createAssociatedTokenAccount(recipient, mint.address, 0n);
 
 const ix = tokenTransfer(alice.address, bob.address, authority, 1_000n);
 
-const result = vm.processTransaction(ix, [mint, alice, bob]);
+const result = vm.processInstruction(ix, [mint, alice, bob]);
 
 result.assertSuccess();
 console.log(result.tokenBalance(bob.address));   // 1000n
@@ -381,7 +381,6 @@ for (const diff of result.modifiedAccounts) {
   console.log(`${diff.pre.address}: ${diff.pre.lamports} -> ${diff.post.lamports}`);
 }
 
-vm.free();
 ```
 
 ### TypeScript (kit)
@@ -406,7 +405,7 @@ const bob   = await createAssociatedTokenAccount(recipient, mint.address, 0n);
 
 const ix = tokenTransfer(alice.address, bob.address, authority, 1_000n);
 
-const result = vm.processTransaction(ix, [mint, alice, bob]);
+const result = vm.processInstruction(ix, [mint, alice, bob]);
 
 result.assertSuccess();
 console.log(result.tokenBalance(bob.address));   // 1000n
@@ -417,5 +416,4 @@ for (const diff of result.modifiedAccounts) {
   console.log(`${diff.pre.address}: ${diff.pre.lamports} -> ${diff.post.lamports}`);
 }
 
-vm.free();
 ```

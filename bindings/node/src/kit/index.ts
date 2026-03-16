@@ -1,6 +1,6 @@
 import type { Address } from "@solana/addresses";
 import { address, getAddressEncoder, getAddressDecoder, getProgramDerivedAddress } from "@solana/addresses";
-import type { Instruction } from "@solana/instructions";
+import { AccountRole, type Instruction } from "@solana/instructions";
 import * as ffi from "../ffi.js";
 import {
   serializeInstructions,
@@ -8,7 +8,7 @@ import {
   deserializeResult,
 } from "./wire.js";
 import { ExecutionResult } from "../result.js";
-import type { Clock, EpochSchedule } from "../index.js";
+import { QuasarSvmBase } from "../base.js";
 import type { SvmAccount, KitExecutionResult } from "./types.js";
 import { uniqueAddress } from "../address.js";
 import {
@@ -30,9 +30,11 @@ import type { TokenAccountState } from "../token.js";
 export type { SvmAccount, KitExecutionResult } from "./types.js";
 export { ExecutionResult } from "../result.js";
 export type { ExecutionStatus, ProgramError, AccountDiff, Clock, EpochSchedule } from "../index.js";
-export { SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID, LOADER_V2, LOADER_V3 } from "../programs.js";
+export { SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID, LOADER_V2, LOADER_V3, LAMPORTS_PER_SOL, sol, tokens } from "../programs.js";
 export { TokenAccountState } from "../token.js";
-export type { MintData, TokenAccountData } from "../token.js";
+import type { Mint as _Mint, Token as _Token } from "../result.js";
+export type Mint = _Mint<Address>;
+export type Token = _Token<Address>;
 
 const addressEncoder = getAddressEncoder();
 const addressDecoder = getAddressDecoder();
@@ -66,27 +68,9 @@ export interface TokenAccountOpts {
 const findAccount = (accounts: SvmAccount[], addr: Address) =>
   accounts.find(a => a.address === addr);
 
-export class QuasarSvm {
-  private ptr: unknown;
-  private freed = false;
+const decodeAddress = (bytes: Uint8Array) => addressDecoder.decode(bytes) as Address;
 
-  constructor() {
-    this.ptr = ffi.quasar_svm_new();
-    if (!this.ptr) {
-      throw new Error(
-        `Failed to create QuasarSvm: ${ffi.quasar_last_error() ?? "unknown"}`
-      );
-    }
-  }
-
-  /** Release native resources. Call when done with the VM. */
-  free(): void {
-    if (!this.freed) {
-      ffi.quasar_svm_free(this.ptr);
-      this.freed = true;
-    }
-  }
-
+export class QuasarSvm extends QuasarSvmBase {
   addProgram(programId: Address, elf: Uint8Array, loaderVersion = LOADER_V3): this {
     this.check(
       ffi.quasar_svm_add_program(
@@ -114,7 +98,6 @@ export class QuasarSvm {
 
   // ---------- Account store ----------
 
-  /** Store an account in the SVM's persistent account database. */
   setAccount(account: SvmAccount): void {
     const dataBuf = account.data.length > 0 ? Buffer.from(account.data) : null;
     this.check(
@@ -130,7 +113,6 @@ export class QuasarSvm {
     );
   }
 
-  /** Read an account from the SVM's persistent account database. */
   getAccount(pubkey: Address): SvmAccount | null {
     const ptrOut = [null as unknown];
     const lenOut = [BigInt(0)];
@@ -169,7 +151,6 @@ export class QuasarSvm {
     };
   }
 
-  /** Give lamports to an account, creating it if it doesn't exist. */
   airdrop(pubkey: Address, amount: bigint): void {
     this.check(
       ffi.quasar_svm_airdrop(
@@ -180,7 +161,6 @@ export class QuasarSvm {
     );
   }
 
-  /** Create a rent-exempt account with the given space and owner. */
   createAccount(pubkey: Address, space: bigint, owner: Address): void {
     this.check(
       ffi.quasar_svm_create_account(
@@ -194,7 +174,6 @@ export class QuasarSvm {
 
   // ---------- Cheatcodes ----------
 
-  /** Set the token balance (amount) of an existing token account in the store. */
   setTokenBalance(addr: Address, amount: bigint): void {
     this.check(
       ffi.quasar_svm_set_token_balance(
@@ -205,7 +184,6 @@ export class QuasarSvm {
     );
   }
 
-  /** Set the supply of an existing mint account in the store. */
   setMintSupply(addr: Address, supply: bigint): void {
     this.check(
       ffi.quasar_svm_set_mint_supply(
@@ -216,122 +194,29 @@ export class QuasarSvm {
     );
   }
 
-  /** Set the clock's unix_timestamp. Does not advance slot or epoch. */
-  warpToTimestamp(timestamp: bigint): void {
-    this.check(ffi.quasar_svm_warp_to_timestamp(this.ptr, timestamp));
-  }
-
-  // ---------- Sysvars ----------
-
-  setClock(opts: Clock): void {
-    this.check(
-      ffi.quasar_svm_set_clock(
-        this.ptr,
-        opts.slot,
-        opts.epochStartTimestamp,
-        opts.epoch,
-        opts.leaderScheduleEpoch,
-        opts.unixTimestamp
-      )
-    );
-  }
-
-  warpToSlot(slot: bigint): void {
-    this.check(ffi.quasar_svm_warp_to_slot(this.ptr, slot));
-  }
-
-  setRent(lamportsPerByte: bigint): void {
-    this.check(ffi.quasar_svm_set_rent(this.ptr, lamportsPerByte, 1.0, 0));
-  }
-
-  setEpochSchedule(opts: EpochSchedule): void {
-    this.check(
-      ffi.quasar_svm_set_epoch_schedule(
-        this.ptr,
-        opts.slotsPerEpoch,
-        opts.leaderScheduleSlotOffset,
-        opts.warmup,
-        opts.firstNormalEpoch,
-        opts.firstNormalSlot
-      )
-    );
-  }
-
-  setComputeBudget(maxUnits: bigint): void {
-    this.check(ffi.quasar_svm_set_compute_budget(this.ptr, maxUnits));
-  }
-
   // ---------- Execution ----------
 
-  /** Execute instructions as a single atomic transaction. */
-  processTransaction(
-    instructions: Instruction | Instruction[],
-    accounts: SvmAccount[]
-  ): KitExecutionResult {
-    const ixs = Array.isArray(instructions) ? instructions : [instructions];
-    return this.exec(
-      ffi.quasar_svm_process_transaction,
-      serializeInstructions(ixs),
-      serializeAccounts(accounts)
-    );
+  processInstruction(instruction: Instruction, accounts: SvmAccount[]): KitExecutionResult {
+    return this.exec(ffi.quasar_svm_process_transaction, serializeInstructions([instruction]), serializeAccounts(accounts));
   }
 
-  /** Execute a transaction without committing any state changes. */
-  simulateTransaction(
-    instructions: Instruction | Instruction[],
-    accounts: SvmAccount[]
-  ): KitExecutionResult {
-    const ixs = Array.isArray(instructions) ? instructions : [instructions];
-    return this.exec(
-      ffi.quasar_svm_simulate_transaction,
-      serializeInstructions(ixs),
-      serializeAccounts(accounts)
-    );
+  processInstructionChain(instructions: Instruction[], accounts: SvmAccount[]): KitExecutionResult {
+    return this.exec(ffi.quasar_svm_process_transaction, serializeInstructions(instructions), serializeAccounts(accounts));
+  }
+
+  simulateInstruction(instruction: Instruction, accounts: SvmAccount[]): KitExecutionResult {
+    return this.exec(ffi.quasar_svm_simulate_transaction, serializeInstructions([instruction]), serializeAccounts(accounts));
+  }
+
+  simulateInstructionChain(instructions: Instruction[], accounts: SvmAccount[]): KitExecutionResult {
+    return this.exec(ffi.quasar_svm_simulate_transaction, serializeInstructions(instructions), serializeAccounts(accounts));
   }
 
   // ---------- Internal ----------
 
-  private check(code: number): void {
-    if (code !== 0) {
-      throw new Error(
-        `QuasarSvm error (${code}): ${ffi.quasar_last_error() ?? "unknown"}`
-      );
-    }
-  }
-
-  private exec(
-    fn: Function,
-    ixBuf: Buffer,
-    acctBuf: Buffer
-  ): KitExecutionResult {
-    const ptrOut = [null as unknown];
-    const lenOut = [BigInt(0)];
-
-    const code = fn(
-      this.ptr,
-      ixBuf,
-      ixBuf.length,
-      acctBuf,
-      acctBuf.length,
-      ptrOut,
-      lenOut
-    );
-
-    if (code !== 0) {
-      throw new Error(
-        `Execution error (${code}): ${ffi.quasar_last_error() ?? "unknown"}`
-      );
-    }
-
-    const resultPtr = ptrOut[0];
-    const resultLen = Number(lenOut[0]);
-    const resultBuf = Buffer.from(
-      ffi.koffi.decode(resultPtr, "uint8_t", resultLen)
-    );
-
-    ffi.quasar_result_free(resultPtr, resultLen);
-    const raw = deserializeResult(resultBuf);
-    return new ExecutionResult(raw, findAccount);
+  private exec(fn: Function, ixBuf: Buffer, acctBuf: Buffer): KitExecutionResult {
+    const raw = deserializeResult(this.execRaw(fn, ixBuf, acctBuf));
+    return new ExecutionResult(raw, findAccount, decodeAddress);
   }
 }
 
@@ -346,18 +231,18 @@ export function createSystemAccount(lamports: bigint): SvmAccount;
 export function createSystemAccount(addr: Address, lamports: bigint): SvmAccount;
 export function createSystemAccount(addrOrLamports: Address | bigint, lamports?: bigint): SvmAccount {
   let addr: Address;
-  let sol: bigint;
+  let lamps: bigint;
   if (typeof addrOrLamports === "bigint") {
     addr = addressDecoder.decode(uniqueAddress()) as Address;
-    sol = addrOrLamports;
+    lamps = addrOrLamports;
   } else {
     addr = addrOrLamports;
-    sol = lamports!;
+    lamps = lamports!;
   }
   return {
     address: addr,
     owner: address(SYSTEM_PROGRAM_ID),
-    lamports: sol,
+    lamports: lamps,
     data: new Uint8Array(0),
     executable: false,
   };
@@ -478,9 +363,9 @@ export function tokenTransfer(
   return {
     programAddress: tokenProgramId,
     accounts: [
-      { address: source, role: 1 /* writable */ },
-      { address: destination, role: 1 },
-      { address: authority, role: 2 /* signer */ },
+      { address: source, role: AccountRole.WRITABLE },
+      { address: destination, role: AccountRole.WRITABLE },
+      { address: authority, role: AccountRole.READONLY_SIGNER },
     ],
     data: tokenTransferData(amount),
   };
@@ -494,9 +379,9 @@ export function tokenMintTo(
   return {
     programAddress: tokenProgramId,
     accounts: [
-      { address: mint, role: 1 },
-      { address: destination, role: 1 },
-      { address: mintAuthority, role: 2 },
+      { address: mint, role: AccountRole.WRITABLE },
+      { address: destination, role: AccountRole.WRITABLE },
+      { address: mintAuthority, role: AccountRole.READONLY_SIGNER },
     ],
     data: tokenMintToData(amount),
   };
@@ -510,9 +395,9 @@ export function tokenBurn(
   return {
     programAddress: tokenProgramId,
     accounts: [
-      { address: source, role: 1 },
-      { address: mint, role: 1 },
-      { address: authority, role: 2 },
+      { address: source, role: AccountRole.WRITABLE },
+      { address: mint, role: AccountRole.WRITABLE },
+      { address: authority, role: AccountRole.READONLY_SIGNER },
     ],
     data: tokenBurnData(amount),
   };

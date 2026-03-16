@@ -1,15 +1,42 @@
 import type { AccountDiff, ExecutionStatus, ProgramError } from "./index.js";
-import { unpackMint, unpackTokenAccount } from "./token.js";
-import type { MintData, TokenAccountData } from "./token.js";
+import { unpackMint, unpackTokenAccount, TokenAccountState } from "./token.js";
 
 export type AccountFinder<TAccount, TAddress> = (
   accounts: TAccount[],
   address: TAddress,
 ) => TAccount | undefined;
 
+export type AddressDecoder<TAddress> = (bytes: Uint8Array) => TAddress;
+
+// ---------------------------------------------------------------------------
+// Typed token types — pubkey fields use the layer's native address type
+// ---------------------------------------------------------------------------
+
+export interface Mint<TAddress = unknown> {
+  mintAuthority: TAddress | null;
+  supply: bigint;
+  decimals: number;
+  freezeAuthority: TAddress | null;
+}
+
+export interface Token<TAddress = unknown> {
+  mint: TAddress;
+  owner: TAddress;
+  amount: bigint;
+  delegate: TAddress | null;
+  state: TokenAccountState;
+  isNative: bigint | null;
+  delegatedAmount: bigint;
+  closeAuthority: TAddress | null;
+}
+
+// ---------------------------------------------------------------------------
+// ExecutionResult
+// ---------------------------------------------------------------------------
+
 export class ExecutionResult<
-  TAccount extends { data: Uint8Array; lamports: bigint },
-  TAddress = unknown,
+  TAccount extends { address: unknown; data: Uint8Array; lamports: bigint },
+  TAddress = TAccount["address"],
 > {
   readonly status: ExecutionStatus;
   readonly computeUnits: bigint;
@@ -19,6 +46,7 @@ export class ExecutionResult<
   readonly modifiedAccounts: AccountDiff<TAccount>[];
   readonly logs: string[];
   private readonly findFn: AccountFinder<TAccount, TAddress>;
+  private readonly decodeFn: AddressDecoder<TAddress>;
 
   constructor(
     fields: {
@@ -31,6 +59,7 @@ export class ExecutionResult<
       logs: string[];
     },
     findAccount: AccountFinder<TAccount, TAddress>,
+    decodeAddress: AddressDecoder<TAddress>,
   ) {
     this.status = fields.status;
     this.computeUnits = fields.computeUnits;
@@ -40,6 +69,7 @@ export class ExecutionResult<
     this.modifiedAccounts = fields.modifiedAccounts;
     this.logs = fields.logs;
     this.findFn = findAccount;
+    this.decodeFn = decodeAddress;
   }
 
   isSuccess(): boolean {
@@ -82,6 +112,10 @@ export class ExecutionResult<
     }
   }
 
+  assertCustomError(code: number): void {
+    this.assertError({ type: "Custom", code });
+  }
+
   printLogs(): void {
     for (const log of this.logs) console.log(log);
   }
@@ -98,16 +132,34 @@ export class ExecutionResult<
     return this.account(address)?.data ?? null;
   }
 
-  tokenAccount(address: TAddress): TokenAccountData | null {
+  tokenAccount(address: TAddress): Token<TAddress> | null {
     const acct = this.account(address);
     if (!acct) return null;
-    return unpackTokenAccount(acct.data);
+    const raw = unpackTokenAccount(acct.data);
+    if (!raw) return null;
+    return {
+      mint: this.decodeFn(raw.mint),
+      owner: this.decodeFn(raw.owner),
+      amount: raw.amount,
+      delegate: raw.delegate ? this.decodeFn(raw.delegate) : null,
+      state: raw.state ?? TokenAccountState.Initialized,
+      isNative: raw.isNative ?? null,
+      delegatedAmount: raw.delegatedAmount ?? 0n,
+      closeAuthority: raw.closeAuthority ? this.decodeFn(raw.closeAuthority) : null,
+    };
   }
 
-  mintAccount(address: TAddress): MintData | null {
+  mintAccount(address: TAddress): Mint<TAddress> | null {
     const acct = this.account(address);
     if (!acct) return null;
-    return unpackMint(acct.data);
+    const raw = unpackMint(acct.data);
+    if (!raw) return null;
+    return {
+      mintAuthority: raw.mintAuthority ? this.decodeFn(raw.mintAuthority) : null,
+      supply: raw.supply ?? 0n,
+      decimals: raw.decimals ?? 9,
+      freezeAuthority: raw.freezeAuthority ? this.decodeFn(raw.freezeAuthority) : null,
+    };
   }
 
   tokenBalance(address: TAddress): bigint | null {

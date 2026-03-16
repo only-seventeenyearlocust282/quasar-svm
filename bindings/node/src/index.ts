@@ -67,7 +67,8 @@ export type ExecutionStatus =
 // AccountDiff — pre/post snapshot of a modified account
 // ---------------------------------------------------------------------------
 
-export interface AccountDiff<TAccount> {
+export interface AccountDiff<TAccount extends { address: unknown }> {
+  address: TAccount["address"];
   pre: TAccount;
   post: TAccount;
 }
