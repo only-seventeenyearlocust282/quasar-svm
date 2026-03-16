@@ -1,12 +1,12 @@
 # Tokens
 
-QuasarSVM includes built-in SPL Token types, instruction builders, and result helpers. Everything works with both SPL Token and Token-2022.
+QuasarSVM includes built-in SPL Token types, instruction builders, result helpers, and VM cheatcodes. Everything works with both SPL Token and Token-2022.
 
 ## Types
 
 ### Mint
 
-The `Mint` struct/interface represents SPL Token mint state.
+The `Mint` struct/interface represents SPL Token mint state (returned from result helpers).
 
 **Rust:**
 
@@ -18,41 +18,35 @@ pub struct Mint {
     pub freeze_authority: Option<Pubkey>,
 }
 
-// Default: decimals = 9, supply = 0, no authorities
-let mint = Mint::default();
+let mint = Mint::default(); // decimals = 9, supply = 0, no authorities
 let mint = Mint { decimals: 6, supply: 10_000, ..Default::default() };
 ```
 
 **TypeScript (web3.js):**
 
 ```ts
-interface MintOpts {
-  mintAuthority?: PublicKey;
-  supply?: bigint;
-  decimals?: number;         // default: 9
-  freezeAuthority?: PublicKey;
+interface Mint {
+  mintAuthority: PublicKey | null;
+  supply: bigint;
+  decimals: number;
+  freezeAuthority: PublicKey | null;
 }
-
-createMintAccount(pubkey, { decimals: 6, supply: 10_000n });
-createMintAccount(pubkey, {}); // defaults: decimals 9, supply 0
 ```
 
 **TypeScript (kit):**
 
 ```ts
-interface MintOpts {
-  mintAuthority?: Address;
-  supply?: bigint;
-  decimals?: number;
-  freezeAuthority?: Address;
+interface Mint {
+  mintAuthority: Address | null;
+  supply: bigint;
+  decimals: number;
+  freezeAuthority: Address | null;
 }
-
-createMintAccount(addr, { decimals: 6, supply: 10_000n });
 ```
 
 ### Token
 
-The `Token` struct/interface represents SPL Token account state.
+The `Token` struct/interface represents SPL Token account state (returned from result helpers).
 
 **Rust:**
 
@@ -68,37 +62,36 @@ pub struct Token {
     pub close_authority: Option<Pubkey>,
 }
 
-// Default: state = Initialized, amount = 0
 let token = Token { mint, owner, amount: 5_000, ..Default::default() };
 ```
 
 **TypeScript (web3.js):**
 
 ```ts
-interface TokenAccountOpts {
+interface Token {
   mint: PublicKey;
   owner: PublicKey;
   amount: bigint;
-  delegate?: PublicKey;
-  state?: TokenAccountState; // default: Initialized
-  isNative?: bigint;
-  delegatedAmount?: bigint;
-  closeAuthority?: PublicKey;
+  delegate: PublicKey | null;
+  state: TokenAccountState;
+  isNative: bigint | null;
+  delegatedAmount: bigint;
+  closeAuthority: PublicKey | null;
 }
 ```
 
 **TypeScript (kit):**
 
 ```ts
-interface TokenAccountOpts {
+interface Token {
   mint: Address;
   owner: Address;
   amount: bigint;
-  delegate?: Address;
-  state?: TokenAccountState;
-  isNative?: bigint;
-  delegatedAmount?: bigint;
-  closeAuthority?: Address;
+  delegate: Address | null;
+  state: TokenAccountState;
+  isNative: bigint | null;
+  delegatedAmount: bigint;
+  closeAuthority: Address | null;
 }
 ```
 
@@ -122,7 +115,7 @@ enum TokenAccountState {
 
 ## Instruction Builders
 
-All builders accept a `tokenProgramId` parameter (defaults to SPL Token). Pass `SPL_TOKEN_2022_PROGRAM_ID` for Token-2022.
+All builders accept an optional `tokenProgramId` parameter (defaults to SPL Token). Pass `SPL_TOKEN_2022_PROGRAM_ID` for Token-2022.
 
 ### Transfer
 
@@ -140,9 +133,7 @@ let ix = token_transfer(&source, &destination, &authority, 1_000, &SPL_TOKEN_202
 import { tokenTransfer } from "@blueshift-gg/quasar-svm/web3.js";
 
 const ix = tokenTransfer(source, destination, authority, 1_000n);
-
-// Token-2022
-const ix = tokenTransfer(source, destination, authority, 1_000n, new PublicKey(SPL_TOKEN_2022_PROGRAM_ID));
+const ix = tokenTransfer(source, destination, authority, 1_000n, TOKEN_2022_PROGRAM_ID);
 ```
 
 ```ts
@@ -150,9 +141,7 @@ const ix = tokenTransfer(source, destination, authority, 1_000n, new PublicKey(S
 import { tokenTransfer } from "@blueshift-gg/quasar-svm/kit";
 
 const ix = tokenTransfer(source, destination, authority, 1_000n);
-
-// Token-2022
-const ix = tokenTransfer(source, destination, authority, 1_000n, address(SPL_TOKEN_2022_PROGRAM_ID));
+const ix = tokenTransfer(source, destination, authority, 1_000n, TOKEN_2022_PROGRAM_ID);
 ```
 
 ### MintTo
@@ -168,7 +157,9 @@ let ix = token_mint_to(&mint, &destination, &mint_authority, 5_000, &SPL_TOKEN_P
 import { tokenMintTo } from "@blueshift-gg/quasar-svm/web3.js";
 
 const ix = tokenMintTo(mint, destination, mintAuthority, 5_000n);
+```
 
+```ts
 // kit
 import { tokenMintTo } from "@blueshift-gg/quasar-svm/kit";
 
@@ -188,63 +179,105 @@ let ix = token_burn(&source, &mint, &authority, 500, &SPL_TOKEN_PROGRAM_ID);
 import { tokenBurn } from "@blueshift-gg/quasar-svm/web3.js";
 
 const ix = tokenBurn(source, mint, authority, 500n);
+```
 
+```ts
 // kit
 import { tokenBurn } from "@blueshift-gg/quasar-svm/kit";
 
 const ix = tokenBurn(source, mint, authority, 500n);
 ```
 
-## Result Unpacking
+## Result Token Helpers
 
-After execution, unpack token and mint state from the resulting accounts.
+Methods on `ExecutionResult` for unpacking token and mint state from resulting accounts.
 
-### Token Account
+### tokenAccount / token_account
 
 ```rust
-let result = svm.process_instructions(&[ix], &accounts);
-let token = result.token_account(&ata_pubkey).unwrap();
-assert_eq!(token.amount, 1_000);
-assert_eq!(token.owner, alice.pubkey);
+let token: Option<Token> = result.token_account(&ata_pubkey);
+assert_eq!(token.unwrap().amount, 1_000);
+```
+
+```ts
+const token: Token | null = result.tokenAccount(ataPubkey);
+console.log(token?.amount); // 1000n
+```
+
+### mintAccount / mint_account
+
+```rust
+let mint: Option<Mint> = result.mint_account(&mint_pubkey);
+assert_eq!(mint.unwrap().supply, 15_000);
+```
+
+```ts
+const mint: Mint | null = result.mintAccount(mintPubkey);
+console.log(mint?.supply); // 15000n
+```
+
+### tokenBalance / token_balance
+
+Shorthand to get just the amount:
+
+```rust
+let balance: Option<u64> = result.token_balance(&ata_pubkey);
+assert_eq!(balance, Some(1_000));
+```
+
+```ts
+const balance: bigint | null = result.tokenBalance(ataPubkey);
+console.log(balance); // 1000n
+```
+
+### mintSupply / mint_supply
+
+Shorthand to get just the supply:
+
+```rust
+let supply: Option<u64> = result.mint_supply(&mint_pubkey);
+assert_eq!(supply, Some(15_000));
+```
+
+```ts
+const supply: bigint | null = result.mintSupply(mintPubkey);
+console.log(supply); // 15000n
+```
+
+## VM Cheatcodes
+
+Directly modify token and mint state in the VM's account store without executing instructions.
+
+### setTokenBalance / set_token_balance
+
+Modify the balance of an existing token account in the store:
+
+```rust
+svm.set_token_balance(&token_account_pubkey, 10_000);
 ```
 
 ```ts
 // web3.js
-import { tokenAccount } from "@blueshift-gg/quasar-svm/web3.js";
-
-const result = vm.processInstruction(ix, accounts);
-const token = tokenAccount(result, ataPubkey);
-console.log(token?.amount);  // 1000n
-console.log(token?.owner);   // Uint8Array (32 bytes)
+vm.setTokenBalance(tokenAccountPubkey, 10_000n);
 
 // kit
-import { tokenAccount } from "@blueshift-gg/quasar-svm/kit";
-
-const token = tokenAccount(result, ataAddress);
-console.log(token?.amount);  // 1000n
+vm.setTokenBalance(tokenAccountAddress, 10_000n);
 ```
 
-### Mint Account
+### setMintSupply / set_mint_supply
+
+Modify the supply of an existing mint account in the store:
 
 ```rust
-let mint_state = result.mint_account(&mint_pubkey).unwrap();
-assert_eq!(mint_state.supply, 15_000);
-assert_eq!(mint_state.decimals, 6);
+svm.set_mint_supply(&mint_pubkey, 1_000_000);
 ```
 
 ```ts
 // web3.js
-import { mintAccount } from "@blueshift-gg/quasar-svm/web3.js";
-
-const mint = mintAccount(result, mintPubkey);
-console.log(mint?.supply);   // 15000n
-console.log(mint?.decimals); // 6
+vm.setMintSupply(mintPubkey, 1_000_000n);
 
 // kit
-import { mintAccount } from "@blueshift-gg/quasar-svm/kit";
-
-const mint = mintAccount(result, mintAddress);
-console.log(mint?.supply);   // 15000n
+vm.setMintSupply(mintAddress, 1_000_000n);
 ```
 
 ## ATA Derivation
@@ -268,7 +301,9 @@ const [ata] = PublicKey.findProgramAddressSync(
   [wallet.toBuffer(), tokenProgramId.toBuffer(), mint.toBuffer()],
   new PublicKey(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
 );
+```
 
+```ts
 // kit (async)
 import { getProgramDerivedAddress } from "@solana/addresses";
 
@@ -278,103 +313,109 @@ const [ata] = await getProgramDerivedAddress({
 });
 ```
 
-Or use the `User` class which handles derivation automatically:
-
-```rust
-let alice = User::new(1_000_000_000, &[UserToken::spl(&mint, 5_000)]);
-alice.ata(&mint) // derived ATA address
-```
-
-```ts
-const alice = await User.create(1_000_000_000n, [{ mint, amount: 5_000n }]);
-alice.ata(mint) // derived ATA address
-```
+Or use `createAssociatedTokenAccount` which derives the address and creates the account in one step (see [Accounts](accounts.md)).
 
 ## Full Example
+
+### Rust
 
 ```rust
 use quasar_svm::{QuasarSvm, Pubkey, SPL_TOKEN_PROGRAM_ID};
 use quasar_svm::token::*;
-use quasar_svm::user::{User, UserToken};
 
-let mint = Pubkey::new_unique();
-let mint_account = create_mint_account(
-    &Mint { mint_authority: None, supply: 10_000, decimals: 6, freeze_authority: None },
+let authority = Pubkey::new_unique();
+let recipient = Pubkey::new_unique();
+
+let mint  = create_mint_account(
+    &Mint { decimals: 6, supply: 10_000, ..Default::default() },
     &SPL_TOKEN_PROGRAM_ID,
 );
+let alice = create_associated_token_account(&authority, &mint.address, 5_000, &SPL_TOKEN_PROGRAM_ID);
+let bob   = create_associated_token_account(&recipient, &mint.address, 0, &SPL_TOKEN_PROGRAM_ID);
 
-let alice = User::new(1_000_000_000, &[UserToken::spl(&mint, 5_000)]);
-let bob   = User::new(1_000_000_000, &[UserToken::spl(&mint, 0)]);
-
-let ix = token_transfer(
-    &alice.ata(&mint), &bob.ata(&mint), &alice.pubkey, 1_000, &SPL_TOKEN_PROGRAM_ID,
-);
+let ix = token_transfer(&alice.address, &bob.address, &authority, 1_000, &SPL_TOKEN_PROGRAM_ID);
 
 let mut svm = QuasarSvm::new().with_token_program();
 
-let result = svm.process_instructions(
-    &[ix],
-    &[(mint, mint_account), alice.accounts(), bob.accounts()].concat(),
-);
+let result = svm.process_transaction(&[ix], &[mint, alice, bob]);
 
 result.assert_success();
-assert_eq!(result.token_account(&bob.ata(&mint)).unwrap().amount, 1_000);
-assert_eq!(result.token_account(&alice.ata(&mint)).unwrap().amount, 4_000);
+assert_eq!(result.token_balance(&bob.address), Some(1_000));
+assert_eq!(result.token_balance(&alice.address), Some(4_000));
+
+// Inspect byte-level diffs
+for diff in &result.modified_accounts {
+    println!("{}: {} -> {} lamports", diff.pre.address, diff.pre.lamports, diff.post.lamports);
+}
 ```
 
-**web3.js:**
+### TypeScript (web3.js)
 
 ```ts
 import {
-  QuasarSvm, User,
-  createMintAccount, tokenTransfer, tokenAccount, assertSuccess,
+  QuasarSvm,
+  createMintAccount, createAssociatedTokenAccount,
+  tokenTransfer,
 } from "@blueshift-gg/quasar-svm/web3.js";
 import { Keypair } from "@solana/web3.js";
 
 const vm = new QuasarSvm().addTokenProgram();
 
-const mint = (await Keypair.generate()).publicKey;
-const mintAcct = createMintAccount(mint, { decimals: 6, supply: 10_000n });
+const authority = Keypair.generate().publicKey;
+const recipient = Keypair.generate().publicKey;
 
-const alice = await User.create(1_000_000_000n, [{ mint, amount: 5_000n }]);
-const bob   = await User.create(1_000_000_000n, [{ mint, amount: 0n }]);
+const mint  = createMintAccount({ decimals: 6, supply: 10_000n });
+const alice = createAssociatedTokenAccount(authority, mint.address, 5_000n);
+const bob   = createAssociatedTokenAccount(recipient, mint.address, 0n);
 
-const ix = tokenTransfer(alice.ata(mint), bob.ata(mint), alice.pubkey, 1_000n);
+const ix = tokenTransfer(alice.address, bob.address, authority, 1_000n);
 
-const result = vm.processInstruction(ix, [mintAcct, ...alice.accounts(), ...bob.accounts()]);
+const result = vm.processTransaction(ix, [mint, alice, bob]);
 
-assertSuccess(result);
-console.log(tokenAccount(result, bob.ata(mint))?.amount);   // 1000n
-console.log(tokenAccount(result, alice.ata(mint))?.amount); // 4000n
+result.assertSuccess();
+console.log(result.tokenBalance(bob.address));   // 1000n
+console.log(result.tokenBalance(alice.address)); // 4000n
+
+// Inspect byte-level diffs
+for (const diff of result.modifiedAccounts) {
+  console.log(`${diff.pre.address}: ${diff.pre.lamports} -> ${diff.post.lamports}`);
+}
 
 vm.free();
 ```
 
-**kit:**
+### TypeScript (kit)
 
 ```ts
 import {
-  QuasarSvm, User,
-  createMintAccount, tokenTransfer, tokenAccount, assertSuccess,
+  QuasarSvm,
+  createMintAccount, createAssociatedTokenAccount,
+  tokenTransfer,
 } from "@blueshift-gg/quasar-svm/kit";
 import { generateKeyPair, getAddressFromPublicKey } from "@solana/keys";
 
 const vm = new QuasarSvm().addTokenProgram();
 
-const mintKp = await generateKeyPair();
-const mint = await getAddressFromPublicKey(mintKp.publicKey);
-const mintAcct = createMintAccount(mint, { decimals: 6, supply: 10_000n });
+const authorityKp = await generateKeyPair();
+const authority = await getAddressFromPublicKey(authorityKp.publicKey);
+const recipient = await getAddressFromPublicKey((await generateKeyPair()).publicKey);
 
-const alice = await User.create(1_000_000_000n, [{ mint, amount: 5_000n }]);
-const bob   = await User.create(1_000_000_000n, [{ mint, amount: 0n }]);
+const mint  = createMintAccount({ decimals: 6, supply: 10_000n });
+const alice = await createAssociatedTokenAccount(authority, mint.address, 5_000n);
+const bob   = await createAssociatedTokenAccount(recipient, mint.address, 0n);
 
-const ix = tokenTransfer(alice.ata(mint), bob.ata(mint), alice.pubkey, 1_000n);
+const ix = tokenTransfer(alice.address, bob.address, authority, 1_000n);
 
-const result = vm.processInstruction(ix, [mintAcct, ...alice.accounts(), ...bob.accounts()]);
+const result = vm.processTransaction(ix, [mint, alice, bob]);
 
-assertSuccess(result);
-console.log(tokenAccount(result, bob.ata(mint))?.amount);   // 1000n
-console.log(tokenAccount(result, alice.ata(mint))?.amount); // 4000n
+result.assertSuccess();
+console.log(result.tokenBalance(bob.address));   // 1000n
+console.log(result.tokenBalance(alice.address)); // 4000n
+
+// Inspect byte-level diffs
+for (const diff of result.modifiedAccounts) {
+  console.log(`${diff.pre.address}: ${diff.pre.lamports} -> ${diff.post.lamports}`);
+}
 
 vm.free();
 ```

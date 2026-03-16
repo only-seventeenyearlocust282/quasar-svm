@@ -1,10 +1,9 @@
 import { getAddressEncoder, getAddressDecoder } from "@solana/addresses";
 import type { AccountMeta } from "@solana/instructions";
 import { isSignerRole, isWritableRole } from "@solana/instructions";
-import { lamports } from "@solana/rpc-types";
 import type { Instruction } from "@solana/instructions";
 import type { SvmAccount } from "./types.js";
-import type { ExecutionResult } from "../index.js";
+import type { AccountDiff, ExecutionStatus } from "../index.js";
 import { programErrorFromStatus } from "../index.js";
 
 const addressEncoder = getAddressEncoder();
@@ -65,7 +64,7 @@ export function serializeAccounts(accounts: SvmAccount[]): Buffer {
   for (const a of accounts) {
     buf.set(addressEncoder.encode(a.address), o);
     o += 32;
-    buf.set(addressEncoder.encode(a.programAddress), o);
+    buf.set(addressEncoder.encode(a.owner), o);
     o += 32;
     buf.writeBigUInt64LE(BigInt(a.lamports), o);
     o += 8;
@@ -82,7 +81,31 @@ export function serializeAccounts(accounts: SvmAccount[]): Buffer {
 // Deserialization (wire format -> JS)
 // ---------------------------------------------------------------------------
 
-export function deserializeResult(data: Buffer): ExecutionResult<SvmAccount> {
+function readAccountFields(
+  data: Buffer,
+  o: number,
+): { owner: string; lamports: bigint; data: Uint8Array; executable: boolean; offset: number } {
+  const owner = addressDecoder.decode(data.subarray(o, o + 32));
+  o += 32;
+  const lamports = data.readBigUInt64LE(o);
+  o += 8;
+  const dLen = data.readUInt32LE(o);
+  o += 4;
+  const acctData = new Uint8Array(data.subarray(o, o + dLen));
+  o += dLen;
+  const executable = data[o++] !== 0;
+  return { owner, lamports, data: acctData, executable, offset: o };
+}
+
+export function deserializeResult(data: Buffer): {
+  status: ExecutionStatus;
+  computeUnits: bigint;
+  executionTimeUs: bigint;
+  returnData: Uint8Array;
+  accounts: SvmAccount[];
+  modifiedAccounts: AccountDiff<SvmAccount>[];
+  logs: string[];
+} {
   let o = 0;
 
   const rawStatus = data.readInt32LE(o);
@@ -101,24 +124,16 @@ export function deserializeResult(data: Buffer): ExecutionResult<SvmAccount> {
   o += 4;
   const accounts: SvmAccount[] = [];
   for (let i = 0; i < numAccts; i++) {
-    const acctAddress = addressDecoder.decode(data.subarray(o, o + 32));
+    const address = addressDecoder.decode(data.subarray(o, o + 32));
     o += 32;
-    const programAddress = addressDecoder.decode(data.subarray(o, o + 32));
-    o += 32;
-    const rawLamports = data.readBigUInt64LE(o);
-    o += 8;
-    const dLen = data.readUInt32LE(o);
-    o += 4;
-    const acctData = new Uint8Array(data.subarray(o, o + dLen));
-    o += dLen;
-    const executable = data[o++] !== 0;
+    const fields = readAccountFields(data, o);
+    o = fields.offset;
     accounts.push({
-      address: acctAddress,
-      data: acctData,
-      executable,
-      lamports: lamports(rawLamports),
-      programAddress,
-      space: BigInt(dLen),
+      address: address as SvmAccount["address"],
+      owner: fields.owner as SvmAccount["owner"],
+      lamports: fields.lamports,
+      data: fields.data,
+      executable: fields.executable,
     });
   }
 
@@ -134,20 +149,42 @@ export function deserializeResult(data: Buffer): ExecutionResult<SvmAccount> {
 
   const emLen = data.readUInt32LE(o);
   o += 4;
-  const errorMessage =
-    emLen > 0 ? data.subarray(o, o + emLen).toString("utf8") : null;
+  const errorMessage = emLen > 0 ? data.subarray(o, o + emLen).toString("utf8") : null;
+  o += emLen;
 
-  const status =
+  // Modified accounts (account diffs)
+  const numDiffs = data.readUInt32LE(o);
+  o += 4;
+  const modifiedAccounts: AccountDiff<SvmAccount>[] = [];
+  for (let i = 0; i < numDiffs; i++) {
+    const diffAddress = addressDecoder.decode(data.subarray(o, o + 32));
+    o += 32;
+    const pre = readAccountFields(data, o);
+    o = pre.offset;
+    const post = readAccountFields(data, o);
+    o = post.offset;
+    modifiedAccounts.push({
+      pre: {
+        address: diffAddress as SvmAccount["address"],
+        owner: pre.owner as SvmAccount["owner"],
+        lamports: pre.lamports,
+        data: pre.data,
+        executable: pre.executable,
+      },
+      post: {
+        address: diffAddress as SvmAccount["address"],
+        owner: post.owner as SvmAccount["owner"],
+        lamports: post.lamports,
+        data: post.data,
+        executable: post.executable,
+      },
+    });
+  }
+
+  const status: ExecutionStatus =
     rawStatus === 0
       ? { ok: true as const }
       : { ok: false as const, error: programErrorFromStatus(rawStatus, errorMessage) };
 
-  return {
-    status,
-    computeUnits,
-    executionTimeUs,
-    returnData,
-    accounts,
-    logs,
-  };
+  return { status, computeUnits, executionTimeUs, returnData, accounts, modifiedAccounts, logs };
 }

@@ -5,7 +5,7 @@ use std::slice;
 use crate::error::*;
 use crate::wire;
 use quasar_svm::loader_keys;
-use quasar_svm::QuasarSvm;
+use quasar_svm::{QuasarSvm, SvmAccount};
 
 // ---------------------------------------------------------------------------
 // Error query
@@ -118,6 +118,18 @@ pub extern "C" fn quasar_svm_warp_to_slot(svm: *mut QuasarSvm, slot: u64) -> i32
     QUASAR_OK
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn quasar_svm_warp_to_timestamp(svm: *mut QuasarSvm, timestamp: i64) -> i32 {
+    clear_last_error();
+    if svm.is_null() {
+        set_last_error("Null pointer argument");
+        return QUASAR_ERR_NULL_POINTER;
+    }
+    let svm = unsafe { &mut *svm };
+    svm.warp_to_timestamp(timestamp);
+    QUASAR_OK
+}
+
 #[allow(deprecated)]
 #[unsafe(no_mangle)]
 pub extern "C" fn quasar_svm_set_rent(
@@ -182,7 +194,7 @@ pub extern "C" fn quasar_svm_set_compute_budget(svm: *mut QuasarSvm, max_units: 
 // ---------------------------------------------------------------------------
 
 /// Store an account in the SVM's account database.
-/// The account is provided as raw fields (not wire-format).
+/// The account is provided as raw fields (SvmAccount-style).
 #[unsafe(no_mangle)]
 pub extern "C" fn quasar_svm_set_account(
     svm: *mut QuasarSvm,
@@ -206,21 +218,18 @@ pub extern "C" fn quasar_svm_set_account(
     } else {
         unsafe { slice::from_raw_parts(data, data_len as usize) }.to_vec()
     };
-    svm.set_account(
-        pk,
-        quasar_svm::Account {
-            lamports,
-            data: account_data,
-            owner: owner_pk,
-            executable,
-            rent_epoch: 0,
-        },
-    );
+    svm.set_account(SvmAccount {
+        address: pk,
+        lamports,
+        data: account_data,
+        owner: owner_pk,
+        executable,
+    });
     QUASAR_OK
 }
 
 /// Read an account from the SVM's account database.
-/// Returns serialized account data via out-pointers, or QUASAR_ERR_EXECUTION if not found.
+/// Returns serialized SvmAccount data via out-pointers, or QUASAR_ERR_EXECUTION if not found.
 #[unsafe(no_mangle)]
 pub extern "C" fn quasar_svm_get_account(
     svm: *const QuasarSvm,
@@ -237,7 +246,7 @@ pub extern "C" fn quasar_svm_get_account(
     let pk = solana_pubkey::Pubkey::new_from_array(unsafe { *pubkey });
     match svm.get_account(&pk) {
         Some(account) => {
-            let serialized = wire::serialize_single_account(&pk, account);
+            let serialized = wire::serialize_single_account(&account);
             let len = serialized.len();
             let ptr = Box::into_raw(serialized) as *mut u8;
             unsafe {
@@ -291,6 +300,68 @@ pub extern "C" fn quasar_svm_create_account(
     QUASAR_OK
 }
 
+// ---------------------------------------------------------------------------
+// Cheatcodes
+// ---------------------------------------------------------------------------
+
+/// Set the token balance (amount) of an existing token account in the store.
+/// Returns QUASAR_ERR_EXECUTION if the account is not found or not a valid token account.
+#[unsafe(no_mangle)]
+pub extern "C" fn quasar_svm_set_token_balance(
+    svm: *mut QuasarSvm,
+    pubkey: *const [u8; 32],
+    amount: u64,
+) -> i32 {
+    clear_last_error();
+    if svm.is_null() || pubkey.is_null() {
+        set_last_error("Null pointer argument");
+        return QUASAR_ERR_NULL_POINTER;
+    }
+    match std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let svm = unsafe { &mut *svm };
+        let pk = solana_pubkey::Pubkey::new_from_array(unsafe { *pubkey });
+        svm.set_token_balance(&pk, amount);
+        QUASAR_OK
+    })) {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("set_token_balance failed: account not found or not a valid token account");
+            QUASAR_ERR_EXECUTION
+        }
+    }
+}
+
+/// Set the supply of an existing mint account in the store.
+/// Returns QUASAR_ERR_EXECUTION if the account is not found or not a valid mint account.
+#[unsafe(no_mangle)]
+pub extern "C" fn quasar_svm_set_mint_supply(
+    svm: *mut QuasarSvm,
+    pubkey: *const [u8; 32],
+    supply: u64,
+) -> i32 {
+    clear_last_error();
+    if svm.is_null() || pubkey.is_null() {
+        set_last_error("Null pointer argument");
+        return QUASAR_ERR_NULL_POINTER;
+    }
+    match std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let svm = unsafe { &mut *svm };
+        let pk = solana_pubkey::Pubkey::new_from_array(unsafe { *pubkey });
+        svm.set_mint_supply(&pk, supply);
+        QUASAR_OK
+    })) {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("set_mint_supply failed: account not found or not a valid mint account");
+            QUASAR_ERR_EXECUTION
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Execution -- serialized bytes in, serialized bytes out
+// ---------------------------------------------------------------------------
+
 /// Execute a transaction without committing state changes.
 #[unsafe(no_mangle)]
 pub extern "C" fn quasar_svm_simulate_transaction(
@@ -332,108 +403,18 @@ pub extern "C" fn quasar_svm_simulate_transaction(
             }
         };
 
-        let exec_result = svm.simulate_transaction(&ixs, &accts);
+        let svm_accounts: Vec<SvmAccount> = accts
+            .into_iter()
+            .map(|(pk, a)| SvmAccount::from_pair(pk, a))
+            .collect();
+
+        let exec_result = svm.simulate_transaction(&ixs, &svm_accounts);
         write_result_out(result_out, result_len_out, &exec_result);
         QUASAR_OK
     })) {
         Ok(code) => code,
         Err(_) => {
             set_last_error("Panic during simulation");
-            QUASAR_ERR_INTERNAL
-        }
-    }
-}
-
-/// Save a snapshot of the current account state. Returns a handle (pointer).
-#[unsafe(no_mangle)]
-pub extern "C" fn quasar_svm_snapshot(svm: *const QuasarSvm) -> *mut std::ffi::c_void {
-    if svm.is_null() {
-        return std::ptr::null_mut();
-    }
-    let svm = unsafe { &*svm };
-    let snap = svm.snapshot();
-    Box::into_raw(Box::new(snap)) as *mut std::ffi::c_void
-}
-
-/// Restore account state from a snapshot. Consumes the snapshot handle.
-#[unsafe(no_mangle)]
-pub extern "C" fn quasar_svm_restore(svm: *mut QuasarSvm, snapshot: *mut std::ffi::c_void) -> i32 {
-    clear_last_error();
-    if svm.is_null() || snapshot.is_null() {
-        set_last_error("Null pointer argument");
-        return QUASAR_ERR_NULL_POINTER;
-    }
-    let svm = unsafe { &mut *svm };
-    let snap = unsafe { Box::from_raw(snapshot as *mut std::collections::HashMap<solana_pubkey::Pubkey, quasar_svm::Account>) };
-    svm.restore(*snap);
-    QUASAR_OK
-}
-
-/// Free a snapshot handle without restoring it.
-#[unsafe(no_mangle)]
-pub extern "C" fn quasar_svm_snapshot_free(snapshot: *mut std::ffi::c_void) {
-    if !snapshot.is_null() {
-        unsafe {
-            drop(Box::from_raw(snapshot as *mut std::collections::HashMap<solana_pubkey::Pubkey, quasar_svm::Account>));
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Execution — serialized bytes in, serialized bytes out
-// ---------------------------------------------------------------------------
-
-/// Execute one or more instructions with shared, persisted account state.
-///
-/// `instructions` / `instructions_len`: count-prefixed serialized instructions.
-/// `accounts` / `accounts_len`: serialized accounts (wire format).
-#[unsafe(no_mangle)]
-pub extern "C" fn quasar_svm_process_instructions(
-    svm: *mut QuasarSvm,
-    instructions: *const u8,
-    instructions_len: u64,
-    accounts: *const u8,
-    accounts_len: u64,
-    result_out: *mut *mut u8,
-    result_len_out: *mut u64,
-) -> i32 {
-    clear_last_error();
-    if svm.is_null()
-        || instructions.is_null()
-        || accounts.is_null()
-        || result_out.is_null()
-        || result_len_out.is_null()
-    {
-        set_last_error("Null pointer argument");
-        return QUASAR_ERR_NULL_POINTER;
-    }
-    match std::panic::catch_unwind(AssertUnwindSafe(|| {
-        let svm = unsafe { &mut *svm };
-        let ix_bytes = unsafe { slice::from_raw_parts(instructions, instructions_len as usize) };
-        let acct_bytes = unsafe { slice::from_raw_parts(accounts, accounts_len as usize) };
-
-        let ixs = match wire::deserialize_instructions(ix_bytes) {
-            Ok(v) => v,
-            Err(e) => {
-                set_last_error(format!("Invalid instructions data: {e}"));
-                return QUASAR_ERR_EXECUTION;
-            }
-        };
-        let accts = match wire::deserialize_accounts(acct_bytes) {
-            Ok(a) => a,
-            Err(e) => {
-                set_last_error(format!("Invalid accounts data: {e}"));
-                return QUASAR_ERR_EXECUTION;
-            }
-        };
-
-        let exec_result = svm.process_instructions(&ixs, &accts);
-        write_result_out(result_out, result_len_out, &exec_result);
-        QUASAR_OK
-    })) {
-        Ok(code) => code,
-        Err(_) => {
-            set_last_error("Panic during instruction execution");
             QUASAR_ERR_INTERNAL
         }
     }
@@ -483,7 +464,12 @@ pub extern "C" fn quasar_svm_process_transaction(
             }
         };
 
-        let exec_result = svm.process_transaction(&ixs, &accts);
+        let svm_accounts: Vec<SvmAccount> = accts
+            .into_iter()
+            .map(|(pk, a)| SvmAccount::from_pair(pk, a))
+            .collect();
+
+        let exec_result = svm.process_transaction(&ixs, &svm_accounts);
         write_result_out(result_out, result_len_out, &exec_result);
         QUASAR_OK
     })) {

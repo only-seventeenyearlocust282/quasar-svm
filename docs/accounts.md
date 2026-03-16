@@ -1,330 +1,266 @@
 # Accounts
 
-QuasarSVM uses standalone account factory functions to create test account state. Accounts are created externally and passed to execution — they are not stored inside the VM.
+QuasarSVM uses `SvmAccount` as the universal account type across all layers. Account factory functions create `SvmAccount` values that are passed to execution.
+
+## SvmAccount
+
+The unified account type used everywhere — Rust, web3.js, and kit.
+
+**Rust:**
+
+```rust
+pub struct SvmAccount {
+    pub address: Pubkey,
+    pub lamports: u64,
+    pub data: Vec<u8>,
+    pub owner: Pubkey,
+    pub executable: bool,
+}
+```
+
+**TypeScript (web3.js):**
+
+```ts
+interface SvmAccount {
+  address: PublicKey;
+  lamports: bigint;
+  data: Buffer;
+  owner: PublicKey;
+  executable: boolean;
+}
+```
+
+**TypeScript (kit):**
+
+```ts
+interface SvmAccount {
+  address: Address;
+  lamports: bigint;
+  data: Uint8Array;
+  owner: Address;
+  executable: boolean;
+}
+```
+
+## KeyedAccountInfo Interop (web3.js only)
+
+The web3.js layer provides converters for interop with legacy code that uses `KeyedAccountInfo`:
+
+```ts
+import { toKeyedAccountInfo, fromKeyedAccountInfo } from "@blueshift-gg/quasar-svm/web3.js";
+
+// SvmAccount -> KeyedAccountInfo
+const keyed = toKeyedAccountInfo(svmAccount);
+
+// KeyedAccountInfo -> SvmAccount
+const account = fromKeyedAccountInfo(keyed);
+```
 
 ## Account Factories
 
-All factories support both SPL Token and Token-2022 via the `tokenProgramId` parameter.
+All factories return `SvmAccount`. The address parameter is **optional** — when omitted, an address is auto-generated.
 
 ### System Account
 
 Create a system-owned account with a SOL balance:
 
+**Rust:**
+
 ```rust
 use quasar_svm::token::create_system_account;
 
-let account = create_system_account(1_000_000_000); // 1 SOL
+// Auto-generated address
+let account = create_system_account(1_000_000_000);
+
+// Explicit address
+let account = create_system_account_at(&pubkey, 1_000_000_000);
 ```
 
+**TypeScript (web3.js):**
+
 ```ts
-// web3.js
 import { createSystemAccount } from "@blueshift-gg/quasar-svm/web3.js";
 
-const account = createSystemAccount(pubkey, 1_000_000_000n);
-// account.accountId: PublicKey, account.accountInfo: AccountInfo<Buffer>
+// Auto-generated address
+const account = createSystemAccount(1_000_000_000n);
 
-// kit
+// Explicit address
+const account = createSystemAccount(pubkey, 1_000_000_000n);
+```
+
+**TypeScript (kit):**
+
+```ts
 import { createSystemAccount } from "@blueshift-gg/quasar-svm/kit";
 
-const account = createSystemAccount(addr, 1_000_000_000n);
-// account.address: Address, account.programAddress: Address
+const account = createSystemAccount(1_000_000_000n);
+const account = createSystemAccount(address, 1_000_000_000n);
 ```
 
 ### Mint Account
 
 Create a pre-initialized SPL Token mint:
 
-```rust
-use quasar_svm::token::{create_mint_account, Mint};
+**Rust:**
 
+```rust
+use quasar_svm::token::{create_mint_account, create_mint_account_at, Mint};
+
+// Auto-generated address
 let account = create_mint_account(
-    &Mint { mint_authority: Some(authority), supply: 0, decimals: 6, freeze_authority: None },
+    &Mint { decimals: 6, supply: 10_000, ..Default::default() },
+    &SPL_TOKEN_PROGRAM_ID,
+);
+
+// Explicit address
+let account = create_mint_account_at(
+    &pubkey,
+    &Mint { decimals: 6, ..Default::default() },
     &SPL_TOKEN_PROGRAM_ID,
 );
 
 // Token-2022
-let account = create_mint_account(&mint, &SPL_TOKEN_2022_PROGRAM_ID);
+let account = create_mint_account(
+    &Mint { decimals: 6, ..Default::default() },
+    &SPL_TOKEN_2022_PROGRAM_ID,
+);
 ```
 
+**TypeScript (web3.js):**
+
 ```ts
-// web3.js
-const account = createMintAccount(pubkey, { mintAuthority: authority, decimals: 6 });
+import { createMintAccount } from "@blueshift-gg/quasar-svm/web3.js";
+
+// Auto-generated address
+const account = createMintAccount({ decimals: 6 });
+const account = createMintAccount({ decimals: 6, supply: 10_000n });
+
+// Explicit address
+const account = createMintAccount(pubkey, { decimals: 6 });
 
 // Token-2022
-const account = createMintAccount(pubkey, { decimals: 6 }, new PublicKey(SPL_TOKEN_2022_PROGRAM_ID));
+const account = createMintAccount({ decimals: 6 }, TOKEN_2022_PROGRAM_ID);
+const account = createMintAccount(pubkey, { decimals: 6 }, TOKEN_2022_PROGRAM_ID);
+```
 
-// kit
+**TypeScript (kit):**
+
+```ts
 import { createMintAccount } from "@blueshift-gg/quasar-svm/kit";
 
-const account = createMintAccount(addr, { mintAuthority: authority, decimals: 6 });
-const account = createMintAccount(addr, { decimals: 6 }, address(SPL_TOKEN_2022_PROGRAM_ID));
+const account = createMintAccount({ decimals: 6 });
+const account = createMintAccount(address, { decimals: 6 });
+const account = createMintAccount({ decimals: 6 }, TOKEN_2022_PROGRAM_ID);
 ```
 
 ### Token Account
 
-Create a pre-initialized token account at a specific address:
+Create a pre-initialized token account:
+
+**Rust:**
 
 ```rust
-use quasar_svm::token::{create_token_account, Token};
+use quasar_svm::token::{create_token_account, create_token_account_at, Token};
 
+// Auto-generated address
 let account = create_token_account(
+    &Token { mint, owner, amount: 5_000, ..Default::default() },
+    &SPL_TOKEN_PROGRAM_ID,
+);
+
+// Explicit address
+let account = create_token_account_at(
+    &pubkey,
     &Token { mint, owner, amount: 5_000, ..Default::default() },
     &SPL_TOKEN_PROGRAM_ID,
 );
 ```
 
+**TypeScript (web3.js):**
+
 ```ts
-// web3.js
+import { createTokenAccount } from "@blueshift-gg/quasar-svm/web3.js";
+
+// Auto-generated address
+const account = createTokenAccount({ mint, owner, amount: 5_000n });
+
+// Explicit address
 const account = createTokenAccount(pubkey, { mint, owner, amount: 5_000n });
 
-// kit
-const account = createTokenAccount(addr, { mint, owner, amount: 5_000n });
+// Token-2022
+const account = createTokenAccount({ mint, owner, amount: 5_000n }, TOKEN_2022_PROGRAM_ID);
+```
+
+**TypeScript (kit):**
+
+```ts
+import { createTokenAccount } from "@blueshift-gg/quasar-svm/kit";
+
+const account = createTokenAccount({ mint, owner, amount: 5_000n });
+const account = createTokenAccount(address, { mint, owner, amount: 5_000n });
 ```
 
 ### Associated Token Account
 
-Derive the ATA address automatically and create a pre-initialized token account:
+Derive the ATA address automatically and create a pre-initialized token account. The address is always derived (not optional).
+
+**Rust:**
 
 ```rust
 use quasar_svm::token::create_associated_token_account;
 
-let (ata_pubkey, account) = create_associated_token_account(
-    &wallet, &mint, 5_000, &SPL_TOKEN_PROGRAM_ID,
-);
+let account = create_associated_token_account(&wallet, &mint, 5_000, &SPL_TOKEN_PROGRAM_ID);
+// account.address is the derived ATA address
+
+// Token-2022
+let account = create_associated_token_account(&wallet, &mint, 5_000, &SPL_TOKEN_2022_PROGRAM_ID);
 ```
 
-```ts
-// web3.js (sync)
-const account = createAssociatedTokenAccount(owner, mint, 5_000n);
-account.accountId; // derived ATA address
+**TypeScript (web3.js) — sync:**
 
-// kit (async — PDA derivation is async in @solana/addresses)
+```ts
+import { createAssociatedTokenAccount } from "@blueshift-gg/quasar-svm/web3.js";
+
+const account = createAssociatedTokenAccount(owner, mint, 5_000n);
+account.address; // derived ATA address
+
+// Token-2022
+const account = createAssociatedTokenAccount(owner, mint, 5_000n, TOKEN_2022_PROGRAM_ID);
+```
+
+**TypeScript (kit) — async:**
+
+```ts
+import { createAssociatedTokenAccount } from "@blueshift-gg/quasar-svm/kit";
+
+// Async because PDA derivation is async in @solana/addresses
 const account = await createAssociatedTokenAccount(owner, mint, 5_000n);
 account.address; // derived ATA address
+
+const account = await createAssociatedTokenAccount(owner, mint, 5_000n, TOKEN_2022_PROGRAM_ID);
 ```
 
-## User
+> **Note:** All factories are synchronous except kit's `createAssociatedTokenAccount`, which is async due to PDA derivation in `@solana/addresses`.
 
-The `User` class bundles a system account and optional token positions into a single test entity. It auto-generates a keypair, derives ATAs, and flattens everything for execution.
+## Token-2022 Support
 
-### Creating Users
+All factories that create token-related accounts accept an optional `tokenProgramId` / `programId` parameter. Pass `SPL_TOKEN_2022_PROGRAM_ID` to create Token-2022 accounts:
 
 ```rust
-use quasar_svm::user::{User, UserToken};
-
-let alice = User::new(1_000_000_000, &[
-    UserToken::spl(&mint, 5_000),
-    UserToken::spl(&other_mint, 100),
-]);
-
-// Token-2022
-let bob = User::new(1_000_000_000, &[
-    UserToken::spl_2022(&mint_2022, 10_000),
-]);
-
-// SOL only
-let charlie = User::new(1_000_000_000, &[]);
+let mint = create_mint_account(opts, &SPL_TOKEN_2022_PROGRAM_ID);
+let token = create_token_account(opts, &SPL_TOKEN_2022_PROGRAM_ID);
+let ata = create_associated_token_account(&wallet, &mint_addr, amount, &SPL_TOKEN_2022_PROGRAM_ID);
 ```
 
 ```ts
-// web3.js — mint: PublicKey, tokenProgramId: PublicKey
-const alice = await User.create(1_000_000_000n, [
-  { mint, amount: 5_000n },
-  { mint: otherMint, amount: 100n },
-]);
-
-// Token-2022
-const bob = await User.create(1_000_000_000n, [
-  { mint: mint2022, amount: 10_000n, tokenProgramId: new PublicKey(SPL_TOKEN_2022_PROGRAM_ID) },
-]);
-
-// SOL only
-const charlie = await User.create(1_000_000_000n);
+const mint  = createMintAccount({ decimals: 6 }, TOKEN_2022_PROGRAM_ID);
+const token = createTokenAccount({ mint, owner, amount: 5_000n }, TOKEN_2022_PROGRAM_ID);
+const ata   = createAssociatedTokenAccount(owner, mint, 5_000n, TOKEN_2022_PROGRAM_ID);
 ```
 
-```ts
-// kit — mint: Address, tokenProgramId: Address
-import { User } from "@blueshift-gg/quasar-svm/kit";
+## Mint / MintOpts
 
-const alice = await User.create(1_000_000_000n, [
-  { mint, amount: 5_000n },
-  { mint: otherMint, amount: 100n },
-]);
-
-// Token-2022
-const bob = await User.create(1_000_000_000n, [
-  { mint: mint2022, amount: 10_000n, tokenProgramId: address(SPL_TOKEN_2022_PROGRAM_ID) },
-]);
-```
-
-### Using Users
-
-```rust
-alice.pubkey          // the user's public key
-alice.ata(&mint)      // derived ATA address for a mint
-alice.accounts()      // Vec<(Pubkey, Account)> — system + all token accounts
-```
-
-```ts
-// web3.js
-alice.pubkey          // PublicKey
-alice.ata(mint)       // PublicKey — derived ATA address
-alice.accounts()      // KeyedAccountInfo[]
-
-// kit
-alice.pubkey          // Address
-alice.ata(mint)       // Address — derived ATA address
-alice.accounts()      // SvmAccount[]
-```
-
-### Passing to Execution
-
-Flatten user accounts with spread or concat:
-
-```rust
-let result = svm.process_instructions(
-    &[ix],
-    &[alice.accounts(), bob.accounts()].concat(),
-);
-```
-
-```ts
-const result = vm.processInstruction(ix, [
-  ...alice.accounts(),
-  ...bob.accounts(),
-]);
-```
-
-## Named Account Maps
-
-`processInstruction`, `processTransaction`, and `simulateTransaction` accept either an array or a `Record<string, Account>`. This enables typed account maps from codegen:
-
-```ts
-// Array (always works)
-vm.processInstruction(ix, [acct1, acct2, acct3]);
-
-// Named map
-vm.processInstruction(ix, {
-  source: sourceAccount,
-  destination: destAccount,
-  owner: ownerAccount,
-});
-```
-
-### Codegen Integration
-
-When Quasar's IDL generates both instruction builders and account types, the test harness writes itself:
-
-**web3.js:**
-
-```ts
-// Generated by quasar idl
-interface MakeAccounts {
-  maker: KeyedAccountInfo;
-  escrow: KeyedAccountInfo;
-  mintA: KeyedAccountInfo;
-  vaultA: KeyedAccountInfo;
-  systemProgram: KeyedAccountInfo;
-}
-
-// Test code
-const accounts: MakeAccounts = {
-  maker: alice.accounts()[0],
-  escrow: createSystemAccount(escrowPubkey, 0n),
-  mintA: createMintAccount(mintPubkey, { decimals: 6 }),
-  vaultA: createAssociatedTokenAccount(escrowPubkey, mintPubkey, 0n),
-  systemProgram: createSystemAccount(SystemProgram.programId, 0n),
-};
-
-vm.processInstruction(makeIx, accounts);
-```
-
-**kit:**
-
-```ts
-// Generated by quasar idl
-interface MakeAccounts {
-  maker: SvmAccount;
-  escrow: SvmAccount;
-  mintA: SvmAccount;
-  vaultA: SvmAccount;
-  systemProgram: SvmAccount;
-}
-
-// Test code
-const accounts: MakeAccounts = {
-  maker: alice.accounts()[0],
-  escrow: createSystemAccount(escrowAddr, 0n),
-  mintA: createMintAccount(mintAddr, { decimals: 6 }),
-  vaultA: await createAssociatedTokenAccount(escrowAddr, mintAddr, 0n),
-  systemProgram: createSystemAccount(address(SYSTEM_PROGRAM_ID), 0n),
-};
-
-vm.processInstruction(makeIx, accounts);
-```
-
-### Instruction Chaining
-
-Spread multiple account maps together when chaining instructions:
-
-```ts
-vm.processInstruction(
-  [createAtaIx, transferIx],
-  { ...createAtaAccounts, ...transferAccounts },
-);
-```
-
-When keys collide (e.g., both have `mint`), the last spread wins. This is correct when both reference the same account.
-
-## MintOpts / TokenAccountOpts
-
-Full interfaces for advanced account configuration:
-
-**web3.js:**
-
-```ts
-interface MintOpts {
-  mintAuthority?: PublicKey;
-  supply?: bigint;
-  decimals?: number;
-  freezeAuthority?: PublicKey;
-}
-
-interface TokenAccountOpts {
-  mint: PublicKey;
-  owner: PublicKey;
-  amount: bigint;
-  delegate?: PublicKey;
-  state?: TokenAccountState;       // Uninitialized | Initialized | Frozen
-  isNative?: bigint;
-  delegatedAmount?: bigint;
-  closeAuthority?: PublicKey;
-}
-```
-
-**kit:**
-
-```ts
-interface MintOpts {
-  mintAuthority?: Address;
-  supply?: bigint;
-  decimals?: number;
-  freezeAuthority?: Address;
-}
-
-interface TokenAccountOpts {
-  mint: Address;
-  owner: Address;
-  amount: bigint;
-  delegate?: Address;
-  state?: TokenAccountState;
-  isNative?: bigint;
-  delegatedAmount?: bigint;
-  closeAuthority?: Address;
-}
-```
-
-Rust equivalents use `Mint` and `Token` structs with the same fields:
+**Rust:**
 
 ```rust
 pub struct Mint {
@@ -333,7 +269,35 @@ pub struct Mint {
     pub decimals: u8,
     pub freeze_authority: Option<Pubkey>,
 }
+```
 
+**TypeScript (web3.js):**
+
+```ts
+interface MintOpts {
+  mintAuthority?: PublicKey;
+  supply?: bigint;
+  decimals?: number;         // default: 9
+  freezeAuthority?: PublicKey;
+}
+```
+
+**TypeScript (kit):**
+
+```ts
+interface MintOpts {
+  mintAuthority?: Address;
+  supply?: bigint;
+  decimals?: number;
+  freezeAuthority?: Address;
+}
+```
+
+## Token / TokenAccountOpts
+
+**Rust:**
+
+```rust
 pub struct Token {
     pub mint: Pubkey,
     pub owner: Pubkey,
@@ -343,5 +307,35 @@ pub struct Token {
     pub is_native: Option<u64>,
     pub delegated_amount: u64,
     pub close_authority: Option<Pubkey>,
+}
+```
+
+**TypeScript (web3.js):**
+
+```ts
+interface TokenAccountOpts {
+  mint: PublicKey;
+  owner: PublicKey;
+  amount: bigint;
+  delegate?: PublicKey;
+  state?: TokenAccountState;       // default: Initialized
+  isNative?: bigint;
+  delegatedAmount?: bigint;
+  closeAuthority?: PublicKey;
+}
+```
+
+**TypeScript (kit):**
+
+```ts
+interface TokenAccountOpts {
+  mint: Address;
+  owner: Address;
+  amount: bigint;
+  delegate?: Address;
+  state?: TokenAccountState;
+  isNative?: bigint;
+  delegatedAmount?: bigint;
+  closeAuthority?: Address;
 }
 ```

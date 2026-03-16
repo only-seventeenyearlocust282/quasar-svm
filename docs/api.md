@@ -1,6 +1,6 @@
 # Core API
 
-QuasarSVM provides an in-process Solana execution engine. Create a `QuasarSvm` instance, load programs, configure sysvars, and execute instructions.
+QuasarSVM provides an in-process Solana execution engine. Create a `QuasarSvm` instance, load programs, execute transactions, and inspect results with byte-level account diffs.
 
 ## QuasarSvm
 
@@ -13,6 +13,8 @@ let svm = QuasarSvm::new();
 ```ts
 const vm = new QuasarSvm();
 ```
+
+> **Important:** In TypeScript, always call `vm.free()` when done to release native resources. Failing to do so will leak memory.
 
 ### Loading Programs
 
@@ -54,118 +56,131 @@ const vm = new QuasarSvm()
   .addAssociatedTokenProgram();
 ```
 
-`addSystemProgram()` / `with_system_program()` are no-ops — the system program is always available.
+### Executing Transactions
 
-### Executing Instructions
-
-Three execution modes:
+Two execution modes:
 
 | Method | Behavior |
 |--------|----------|
-| `process_instructions` / `processInstruction` | Execute instructions sequentially. State persists between instructions. Non-atomic. |
 | `process_transaction` / `processTransaction` | Execute all instructions as one atomic transaction. State rolls back on failure. |
-| `simulate_transaction` / `simulateTransaction` | Execute without committing any state changes. |
+| `simulate_transaction` / `simulateTransaction` | Execute without committing any state changes. Read-only. |
 
 **Rust:**
 
 ```rust
-let result = svm.process_instructions(&[ix], &accounts);
 let result = svm.process_transaction(&[ix1, ix2], &accounts);
 let result = svm.simulate_transaction(&[ix], &accounts);
 ```
 
-Accounts are `&[(Pubkey, Account)]` — a slice of `(address, account_data)` pairs.
+Accounts are `&[SvmAccount]` — a slice of `SvmAccount` structs.
 
 **TypeScript (web3.js):**
 
 ```ts
-// ix: TransactionInstruction, accounts: KeyedAccountInfo[] | Record<string, KeyedAccountInfo>
-const result = vm.processInstruction(ix, accounts);      // single instruction
-const result = vm.processInstruction([ix1, ix2], accounts); // multiple
+// Single instruction
+const result = vm.processTransaction(ix, accounts);
+
+// Multiple instructions
 const result = vm.processTransaction([ix1, ix2], accounts);
-const result = vm.simulateTransaction([ix1, ix2], accounts);
+
+// Read-only simulation
+const result = vm.simulateTransaction(ix, accounts);
 ```
 
 **TypeScript (kit):**
 
 ```ts
-// ix: Instruction, accounts: SvmAccount[] | Record<string, SvmAccount>
-const result = vm.processInstruction(ix, accounts);
-const result = vm.processInstruction([ix1, ix2], accounts);
+const result = vm.processTransaction(ix, accounts);
 const result = vm.processTransaction([ix1, ix2], accounts);
-const result = vm.simulateTransaction([ix1, ix2], accounts);
+const result = vm.simulateTransaction(ix, accounts);
 ```
 
-Accounts accept either an array or a named map (see [Accounts](accounts.md)):
+Accounts are always `SvmAccount[]`:
 
 ```ts
-vm.processInstruction(ix, [acct1, acct2]);
-vm.processInstruction(ix, { source: acct1, destination: acct2 });
+vm.processTransaction(ix, [acct1, acct2, acct3]);
 ```
 
 ### Account Store
 
-The SVM maintains a persistent account database. Accounts passed to execution are merged with the database automatically.
+The SVM maintains a persistent account database. Accounts passed to execution are merged with the store automatically.
 
 ```rust
-svm.set_account(pubkey, account);
+svm.set_account(svm_account);
 let acct = svm.get_account(&pubkey);
 svm.airdrop(&pubkey, 1_000_000_000);
 svm.create_account(&pubkey, space, &owner);
 ```
 
 ```ts
-// web3.js — pubkey: PublicKey, accountInfo: AccountInfo<Buffer>
-vm.setAccount(pubkey, accountInfo);
-const acct: KeyedAccountInfo | null = vm.getAccount(pubkey);
-vm.airdrop(pubkey, 1_000_000_000n);
-vm.createAccount(pubkey, 0n, owner);
-
-// kit — pubkey: Address, account: SvmAccount
-vm.setAccount(account);  // address is inside SvmAccount
+// web3.js
+vm.setAccount(svmAccount);
 const acct: SvmAccount | null = vm.getAccount(pubkey);
 vm.airdrop(pubkey, 1_000_000_000n);
 vm.createAccount(pubkey, 0n, owner);
+
+// kit
+vm.setAccount(svmAccount);
+const acct: SvmAccount | null = vm.getAccount(address);
+vm.airdrop(address, 1_000_000_000n);
+vm.createAccount(address, 0n, owner);
 ```
 
 Builder-style (Rust):
 
 ```rust
 let svm = QuasarSvm::new()
-    .with_account(pubkey, account)
+    .with_account(svm_account)
     .with_airdrop(&pubkey, 1_000_000_000)
     .with_create_account(&pubkey, 0, &owner);
 ```
 
-### Snapshots
+### Cheatcodes
 
-Save and restore account state for test isolation:
+Cheatcodes modify VM state directly for test setup.
+
+#### Token Cheatcodes
+
+Modify existing token/mint accounts in the store:
 
 ```rust
-let snap = svm.snapshot();
-// ... execute instructions ...
-svm.restore(snap);
+svm.set_token_balance(&token_account_pubkey, 5_000);
+svm.set_mint_supply(&mint_pubkey, 100_000);
 ```
 
 ```ts
-const snap = vm.snapshot();
-// ... execute instructions ...
-vm.restore(snap);
-vm.snapshotFree(snap); // free without restoring
+// web3.js
+vm.setTokenBalance(tokenAccountPubkey, 5_000n);
+vm.setMintSupply(mintPubkey, 100_000n);
+
+// kit
+vm.setTokenBalance(tokenAccountAddress, 5_000n);
+vm.setMintSupply(mintAddress, 100_000n);
 ```
 
-### Sysvars
-
-Configure clock, rent, epoch schedule, and compute budget:
+#### Time & Slot
 
 ```rust
-let svm = QuasarSvm::new().with_slot(100);
+svm.warp_to_timestamp(1_700_000_000);  // sets clock.unix_timestamp only
 svm.sysvars.warp_to_slot(200);
 ```
 
 ```ts
-vm.setClock({ slot: 100n, epochStartTimestamp: 0n, epoch: 0n, leaderScheduleEpoch: 0n, unixTimestamp: 0n });
+vm.warpToTimestamp(1_700_000_000n);  // sets clock.unix_timestamp only
 vm.warpToSlot(200n);
+```
+
+#### Clock, Rent, Epoch, Compute Budget
+
+```rust
+svm.set_clock(clock);
+svm.set_rent(rent);
+svm.set_epoch_schedule(epoch_schedule);
+svm.set_compute_budget(200_000);
+```
+
+```ts
+vm.setClock({ slot: 100n, epochStartTimestamp: 0n, epoch: 0n, leaderScheduleEpoch: 0n, unixTimestamp: 0n });
 vm.setRent(3480n);
 vm.setEpochSchedule({ slotsPerEpoch: 432000n, leaderScheduleSlotOffset: 0n, warmup: false, firstNormalEpoch: 0n, firstNormalSlot: 0n });
 vm.setComputeBudget(200_000n);
@@ -179,9 +194,13 @@ TypeScript only — release native resources when done:
 vm.free();
 ```
 
+This **must** be called when you are finished with the VM. Omitting it will leak native memory.
+
 ## ExecutionResult
 
-Every execution returns an `ExecutionResult` with:
+Every execution returns an `ExecutionResult`. In TypeScript it is a class with methods; in Rust it is a struct with methods.
+
+### Fields
 
 | Field | Rust | TypeScript |
 |-------|------|------------|
@@ -189,65 +208,94 @@ Every execution returns an `ExecutionResult` with:
 | Compute units | `compute_units_consumed: u64` | `computeUnits: bigint` |
 | Execution time | `execution_time_us: u64` | `executionTimeUs: bigint` |
 | Return data | `return_data: Vec<u8>` | `returnData: Uint8Array` |
-| Resulting accounts | `resulting_accounts: Vec<(Pubkey, Account)>` | `accounts: TAccount[]` |
+| Resulting accounts | `resulting_accounts: Vec<SvmAccount>` | `accounts: SvmAccount[]` |
+| Modified accounts | `modified_accounts: Vec<AccountDiff>` | `modifiedAccounts: AccountDiff[]` |
 | Logs | `logs: Vec<String>` | `logs: string[]` |
 
-### Inspecting Results
+### AccountDiff
 
-**Rust:**
+Byte-level diff of accounts that changed during execution:
 
 ```rust
-// Status
+pub struct AccountDiff {
+    pub pre: SvmAccount,
+    pub post: SvmAccount,
+}
+```
+
+```ts
+interface AccountDiff {
+  pre: SvmAccount;
+  post: SvmAccount;
+}
+```
+
+### Assertion Methods
+
+```rust
 result.assert_success();
 result.assert_error(ProgramError::InsufficientFunds);
-assert!(result.is_ok());
-result.unwrap();  // panics with error + logs if failed
-result.expect("transfer should succeed");
-
-// Status enum
-match result.status() {
-    ExecutionStatus::Success => {},
-    ExecutionStatus::Err(e) => {},
-}
-
-// Accounts
-let acct = result.account(&pubkey);
-let data = result.data(&pubkey);
-let lamps = result.lamports(&pubkey);
+assert!(result.is_success());
+assert!(result.is_error());
 result.print_logs();
+```
 
-// Borsh deserialization (requires "borsh" feature)
+```ts
+result.assertSuccess();
+result.assertError({ type: "InsufficientFunds" });
+result.assertError({ type: "Custom", code: 6001 });
+
+result.isSuccess();  // boolean
+result.isError();    // boolean
+result.printLogs();
+```
+
+### Account Lookup Methods
+
+```rust
+let acct: Option<&SvmAccount> = result.account(&pubkey);
+let data: Option<&[u8]> = result.data(&pubkey);
+let lamps: Option<u64> = result.lamports(&pubkey);
+```
+
+```ts
+const acct: SvmAccount | null = result.account(address);
+const data: Uint8Array | null = result.data(address);  // Buffer in web3.js
+const lamps: bigint | null = result.lamports(address);
+```
+
+### Token Helpers
+
+Unpack token and mint state from resulting accounts:
+
+```rust
+let token = result.token_account(&ata_pubkey).unwrap();
+assert_eq!(token.amount, 1_000);
+
+let mint = result.mint_account(&mint_pubkey).unwrap();
+assert_eq!(mint.supply, 15_000);
+
+let balance: Option<u64> = result.token_balance(&ata_pubkey);
+let supply: Option<u64> = result.mint_supply(&mint_pubkey);
+```
+
+```ts
+const token = result.tokenAccount(ataPubkey);    // Token | null
+const mint  = result.mintAccount(mintPubkey);     // Mint | null
+const balance = result.tokenBalance(ataPubkey);   // bigint | null
+const supply  = result.mintSupply(mintPubkey);    // bigint | null
+```
+
+### Borsh Deserialization (Rust)
+
+```rust
+// Requires "borsh" feature
 let state: MyState = result.account_data(&pubkey).unwrap();
 ```
 
-**TypeScript (web3.js):**
+## ProgramError
 
-```ts
-// result: ExecutionResult<KeyedAccountInfo>
-assertSuccess(result);
-assertError(result, { type: "InsufficientFunds" });
-assertError(result, { type: "Custom", code: 6001 });
-
-if (result.status.ok) { /* success */ }
-console.log(result.computeUnits);
-console.log(result.logs);
-```
-
-**TypeScript (kit):**
-
-```ts
-// result: ExecutionResult<SvmAccount>
-assertSuccess(result);
-assertError(result, { type: "InsufficientFunds" });
-assertError(result, { type: "Custom", code: 6001 });
-
-// Same API — only the account type differs
-result.accounts; // SvmAccount[] (has .address, .programAddress, .data)
-```
-
-### ProgramError
-
-TypeScript uses a discriminated union:
+TypeScript uses a discriminated union. Known errors map to negative codes; `Custom(n)` maps to positive codes.
 
 ```ts
 type ProgramError =

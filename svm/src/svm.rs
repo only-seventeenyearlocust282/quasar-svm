@@ -26,6 +26,8 @@ use solana_transaction_context::{IndexOfAccount, TransactionContext};
 
 use crate::program_cache::ProgramCache;
 use crate::sysvars::Sysvars;
+use crate::token::{Mint, Token};
+use crate::{AccountDiff, SvmAccount};
 
 struct NoOpCallback;
 
@@ -54,7 +56,8 @@ pub struct ExecutionResult {
     pub execution_time_us: u64,
     pub raw_result: Result<(), InstructionError>,
     pub return_data: Vec<u8>,
-    pub resulting_accounts: Vec<(Pubkey, Account)>,
+    pub accounts: Vec<SvmAccount>,
+    pub modified_accounts: Vec<AccountDiff>,
     pub logs: Vec<String>,
 }
 
@@ -95,13 +98,16 @@ impl QuasarSvm {
 
     /// Store an account in the SVM's account database.
     /// Stored accounts are automatically included when processing transactions.
-    pub fn set_account(&mut self, pubkey: Pubkey, account: Account) {
-        self.accounts.insert(pubkey, account);
+    pub fn set_account(&mut self, account: SvmAccount) {
+        let (pubkey, acct) = account.to_pair();
+        self.accounts.insert(pubkey, acct);
     }
 
     /// Read an account from the SVM's account database.
-    pub fn get_account(&self, pubkey: &Pubkey) -> Option<&Account> {
-        self.accounts.get(pubkey)
+    pub fn get_account(&self, pubkey: &Pubkey) -> Option<SvmAccount> {
+        self.accounts
+            .get(pubkey)
+            .map(|a| SvmAccount::from_pair(*pubkey, a.clone()))
     }
 
     /// Give lamports to an account, creating it if it doesn't exist.
@@ -132,15 +138,53 @@ impl QuasarSvm {
         self.accounts.insert(*pubkey, account);
     }
 
+    /// Set the token balance (amount) of an existing token account in the store.
+    /// Panics if the account is not found or is not a valid SPL Token account.
+    pub fn set_token_balance(&mut self, address: &Pubkey, amount: u64) {
+        let acct = self
+            .accounts
+            .get_mut(address)
+            .unwrap_or_else(|| panic!("set_token_balance: account {address} not found"));
+        let mut token = Token::unpack(&acct.data)
+            .unwrap_or_else(|| panic!("set_token_balance: account {address} is not a valid token account"));
+        token.amount = amount;
+        acct.data = token.pack();
+    }
+
+    /// Set the supply of an existing mint account in the store.
+    /// Panics if the account is not found or is not a valid SPL Mint account.
+    pub fn set_mint_supply(&mut self, address: &Pubkey, supply: u64) {
+        let acct = self
+            .accounts
+            .get_mut(address)
+            .unwrap_or_else(|| panic!("set_mint_supply: account {address} not found"));
+        let mut mint = Mint::unpack(&acct.data)
+            .unwrap_or_else(|| panic!("set_mint_supply: account {address} is not a valid mint account"));
+        mint.supply = supply;
+        acct.data = mint.pack();
+    }
+
+    /// Set the clock's unix_timestamp only.
+    pub fn warp_to_timestamp(&mut self, timestamp: i64) {
+        self.sysvars.clock.unix_timestamp = timestamp;
+    }
+
     /// Execute a transaction without committing any state changes.
     pub fn simulate_transaction(
         &mut self,
         instructions: &[Instruction],
-        accounts: &[(Pubkey, Account)],
+        accounts: &[SvmAccount],
     ) -> ExecutionResult {
         self.reset_logger();
 
-        let merged = self.merge_accounts(accounts);
+        let pairs: Vec<(Pubkey, Account)> = accounts.iter().map(|a| a.to_pair()).collect();
+        let merged = self.merge_accounts(&pairs);
+
+        // Snapshot pre-execution state for diffing
+        let pre_accounts: HashMap<Pubkey, SvmAccount> = merged
+            .iter()
+            .map(|(k, v)| (*k, SvmAccount::from_pair(*k, v.clone())))
+            .collect();
 
         let (sanitized_message, transaction_accounts) =
             self.compile_accounts(instructions, &merged);
@@ -158,11 +202,14 @@ impl QuasarSvm {
             self.process_message(&sanitized_message, &mut transaction_context, &sysvar_cache);
 
         // Read resulting accounts but DON'T commit them
-        let resulting_accounts = if raw_result.is_ok() {
+        let resulting_pairs = if raw_result.is_ok() {
             Self::deconstruct_resulting_accounts(&transaction_context, &merged)
         } else {
             merged
         };
+
+        let result_accounts = Self::pairs_to_svm_accounts(&resulting_pairs);
+        let modified_accounts = Self::compute_diffs(&pre_accounts, &resulting_pairs);
 
         let logs = self.drain_logs();
 
@@ -171,19 +218,67 @@ impl QuasarSvm {
             execution_time_us,
             raw_result,
             return_data,
-            resulting_accounts,
+            accounts: result_accounts,
+            modified_accounts,
             logs,
         }
     }
 
-    /// Save a snapshot of the current account state.
-    pub fn snapshot(&self) -> HashMap<Pubkey, Account> {
-        self.accounts.clone()
-    }
+    /// Execute multiple instructions as a single atomic transaction.
+    /// Accounts from the SVM's database are merged in automatically.
+    pub fn process_transaction(
+        &mut self,
+        instructions: &[Instruction],
+        accounts: &[SvmAccount],
+    ) -> ExecutionResult {
+        self.reset_logger();
 
-    /// Restore account state from a previous snapshot.
-    pub fn restore(&mut self, snapshot: HashMap<Pubkey, Account>) {
-        self.accounts = snapshot;
+        let pairs: Vec<(Pubkey, Account)> = accounts.iter().map(|a| a.to_pair()).collect();
+        let merged = self.merge_accounts(&pairs);
+
+        // Snapshot pre-execution state for diffing
+        let pre_accounts: HashMap<Pubkey, SvmAccount> = merged
+            .iter()
+            .map(|(k, v)| (*k, SvmAccount::from_pair(*k, v.clone())))
+            .collect();
+
+        let (sanitized_message, transaction_accounts) =
+            self.compile_accounts(instructions, &merged);
+
+        let mut transaction_context = TransactionContext::new(
+            transaction_accounts,
+            self.sysvars.rent.clone(),
+            self.compute_budget.max_instruction_stack_depth,
+            self.compute_budget.max_instruction_trace_length,
+        );
+
+        let sysvar_cache = self.sysvars.setup_sysvar_cache(&merged);
+
+        let (compute_units_consumed, execution_time_us, raw_result, return_data) =
+            self.process_message(&sanitized_message, &mut transaction_context, &sysvar_cache);
+
+        let resulting_pairs = if raw_result.is_ok() {
+            let result = Self::deconstruct_resulting_accounts(&transaction_context, &merged);
+            self.commit_accounts(&result);
+            result
+        } else {
+            merged
+        };
+
+        let result_accounts = Self::pairs_to_svm_accounts(&resulting_pairs);
+        let modified_accounts = Self::compute_diffs(&pre_accounts, &resulting_pairs);
+
+        let logs = self.drain_logs();
+
+        ExecutionResult {
+            compute_units_consumed,
+            execution_time_us,
+            raw_result,
+            return_data,
+            accounts: result_accounts,
+            modified_accounts,
+            logs,
+        }
     }
 
     /// Merge explicit accounts with the stored account database.
@@ -342,6 +437,38 @@ impl QuasarSvm {
             .collect()
     }
 
+    /// Convert a list of (Pubkey, Account) pairs to Vec<SvmAccount>.
+    fn pairs_to_svm_accounts(pairs: &[(Pubkey, Account)]) -> Vec<SvmAccount> {
+        pairs
+            .iter()
+            .map(|(k, v)| SvmAccount::from_pair(*k, v.clone()))
+            .collect()
+    }
+
+    /// Compute byte-level diffs between pre-execution and post-execution account states.
+    fn compute_diffs(
+        pre: &HashMap<Pubkey, SvmAccount>,
+        post: &[(Pubkey, Account)],
+    ) -> Vec<AccountDiff> {
+        let mut diffs = Vec::new();
+        for (pubkey, post_account) in post {
+            if let Some(pre_account) = pre.get(pubkey) {
+                let post_svm = SvmAccount::from_pair(*pubkey, post_account.clone());
+                if pre_account.lamports != post_svm.lamports
+                    || pre_account.data != post_svm.data
+                    || pre_account.owner != post_svm.owner
+                {
+                    diffs.push(AccountDiff {
+                        address: *pubkey,
+                        pre: pre_account.clone(),
+                        post: post_svm,
+                    });
+                }
+            }
+        }
+        diffs
+    }
+
     fn process_message<'a>(
         &self,
         sanitized_message: &'a SanitizedMessage,
@@ -424,114 +551,5 @@ impl QuasarSvm {
             raw_result,
             return_data,
         )
-    }
-
-    /// Execute one or more instructions with shared accounts.
-    /// Account state persists between instructions. Non-atomic.
-    /// Accounts from the SVM's database are merged in automatically.
-    pub fn process_instructions(
-        &mut self,
-        instructions: &[Instruction],
-        accounts: &[(Pubkey, Account)],
-    ) -> ExecutionResult {
-        self.reset_logger();
-
-        let mut current_accounts = self.merge_accounts(accounts);
-        let mut total_compute_units = 0u64;
-        let mut total_execution_time = 0u64;
-        let mut last_raw_result: Result<(), InstructionError> = Ok(());
-        let mut last_return_data = Vec::new();
-
-        let sysvar_cache = self.sysvars.setup_sysvar_cache(accounts);
-
-        for instruction in instructions {
-            let (sanitized_message, transaction_accounts) =
-                self.compile_accounts(std::slice::from_ref(instruction), &current_accounts);
-
-            let mut transaction_context = TransactionContext::new(
-                transaction_accounts,
-                self.sysvars.rent.clone(),
-                self.compute_budget.max_instruction_stack_depth,
-                self.compute_budget.max_instruction_trace_length,
-            );
-
-            let (cu, time, result, ret_data) =
-                self.process_message(&sanitized_message, &mut transaction_context, &sysvar_cache);
-
-            total_compute_units += cu;
-            total_execution_time += time;
-            last_return_data = ret_data;
-
-            if result.is_ok() {
-                current_accounts =
-                    Self::deconstruct_resulting_accounts(&transaction_context, &current_accounts);
-            }
-
-            last_raw_result = result;
-            if last_raw_result.is_err() {
-                break;
-            }
-        }
-
-        if last_raw_result.is_ok() {
-            self.commit_accounts(&current_accounts);
-        }
-
-        let logs = self.drain_logs();
-
-        ExecutionResult {
-            compute_units_consumed: total_compute_units,
-            execution_time_us: total_execution_time,
-            raw_result: last_raw_result,
-            return_data: last_return_data,
-            resulting_accounts: current_accounts,
-            logs,
-        }
-    }
-
-    /// Execute multiple instructions as a single atomic transaction.
-    /// Accounts from the SVM's database are merged in automatically.
-    pub fn process_transaction(
-        &mut self,
-        instructions: &[Instruction],
-        accounts: &[(Pubkey, Account)],
-    ) -> ExecutionResult {
-        self.reset_logger();
-
-        let merged = self.merge_accounts(accounts);
-
-        let (sanitized_message, transaction_accounts) =
-            self.compile_accounts(instructions, &merged);
-
-        let mut transaction_context = TransactionContext::new(
-            transaction_accounts,
-            self.sysvars.rent.clone(),
-            self.compute_budget.max_instruction_stack_depth,
-            self.compute_budget.max_instruction_trace_length,
-        );
-
-        let sysvar_cache = self.sysvars.setup_sysvar_cache(&merged);
-
-        let (compute_units_consumed, execution_time_us, raw_result, return_data) =
-            self.process_message(&sanitized_message, &mut transaction_context, &sysvar_cache);
-
-        let resulting_accounts = if raw_result.is_ok() {
-            let result = Self::deconstruct_resulting_accounts(&transaction_context, &merged);
-            self.commit_accounts(&result);
-            result
-        } else {
-            merged
-        };
-
-        let logs = self.drain_logs();
-
-        ExecutionResult {
-            compute_units_consumed,
-            execution_time_us,
-            raw_result,
-            return_data,
-            resulting_accounts,
-            logs,
-        }
     }
 }

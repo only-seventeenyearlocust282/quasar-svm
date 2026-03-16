@@ -51,6 +51,10 @@ export const quasar_svm_warp_to_slot = lib.func(
   "int32_t quasar_svm_warp_to_slot(void *svm, uint64_t slot)"
 );
 
+export const quasar_svm_warp_to_timestamp = lib.func(
+  "int32_t quasar_svm_warp_to_timestamp(void *svm, int64_t timestamp)"
+);
+
 export const quasar_svm_set_rent = lib.func(
   "int32_t quasar_svm_set_rent(void *svm, uint64_t lamports_per_byte_year, double exemption_threshold, uint8_t burn_percent)"
 );
@@ -69,10 +73,6 @@ export const quasar_svm_set_account = lib.func(
 
 export const quasar_svm_get_account = lib.func(
   "int32_t quasar_svm_get_account(const void *svm, const void *pubkey, _Out_ void **result_out, _Out_ uint64_t *result_len_out)"
-);
-
-export const quasar_svm_process_instructions = lib.func(
-  "int32_t quasar_svm_process_instructions(void *svm, const void *instructions, uint64_t instructions_len, const void *accounts, uint64_t accounts_len, _Out_ void **result_out, _Out_ uint64_t *result_len_out)"
 );
 
 export const quasar_svm_process_transaction = lib.func(
@@ -95,16 +95,12 @@ export const quasar_svm_simulate_transaction = lib.func(
   "int32_t quasar_svm_simulate_transaction(void *svm, const void *instructions, uint64_t instructions_len, const void *accounts, uint64_t accounts_len, _Out_ void **result_out, _Out_ uint64_t *result_len_out)"
 );
 
-export const quasar_svm_snapshot = lib.func(
-  "void *quasar_svm_snapshot(const void *svm)"
+export const quasar_svm_set_token_balance = lib.func(
+  "int32_t quasar_svm_set_token_balance(void *svm, const void *pubkey, uint64_t amount)"
 );
 
-export const quasar_svm_restore = lib.func(
-  "int32_t quasar_svm_restore(void *svm, void *snapshot)"
-);
-
-export const quasar_svm_snapshot_free = lib.func(
-  "void quasar_svm_snapshot_free(void *snapshot)"
+export const quasar_svm_set_mint_supply = lib.func(
+  "int32_t quasar_svm_set_mint_supply(void *svm, const void *pubkey, uint64_t supply)"
 );
 
 export { koffi };

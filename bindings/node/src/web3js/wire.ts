@@ -1,5 +1,6 @@
-import { type TransactionInstruction, type KeyedAccountInfo, PublicKey } from "@solana/web3.js";
-import type { ExecutionResult } from "../index.js";
+import { type TransactionInstruction, PublicKey } from "@solana/web3.js";
+import type { SvmAccount } from "./types.js";
+import type { AccountDiff, ExecutionStatus } from "../index.js";
 import { programErrorFromStatus } from "../index.js";
 
 // ---------------------------------------------------------------------------
@@ -45,9 +46,9 @@ export function serializeInstructions(ixs: TransactionInstruction[]): Buffer {
   return buf;
 }
 
-export function serializeAccounts(accounts: KeyedAccountInfo[]): Buffer {
+export function serializeAccounts(accounts: SvmAccount[]): Buffer {
   let total = 4;
-  for (const a of accounts) total += 32 + 32 + 8 + 4 + a.accountInfo.data.length + 1;
+  for (const a of accounts) total += 32 + 32 + 8 + 4 + a.data.length + 1;
 
   const buf = Buffer.alloc(total);
   let o = 0;
@@ -55,17 +56,17 @@ export function serializeAccounts(accounts: KeyedAccountInfo[]): Buffer {
   o += 4;
 
   for (const a of accounts) {
-    buf.set(a.accountId.toBuffer(), o);
+    buf.set(a.address.toBuffer(), o);
     o += 32;
-    buf.set(a.accountInfo.owner.toBuffer(), o);
+    buf.set(a.owner.toBuffer(), o);
     o += 32;
-    buf.writeBigUInt64LE(BigInt(a.accountInfo.lamports), o);
+    buf.writeBigUInt64LE(BigInt(a.lamports), o);
     o += 8;
-    buf.writeUInt32LE(a.accountInfo.data.length, o);
+    buf.writeUInt32LE(a.data.length, o);
     o += 4;
-    buf.set(a.accountInfo.data, o);
-    o += a.accountInfo.data.length;
-    buf[o++] = a.accountInfo.executable ? 1 : 0;
+    buf.set(a.data, o);
+    o += a.data.length;
+    buf[o++] = a.executable ? 1 : 0;
   }
   return buf;
 }
@@ -74,7 +75,31 @@ export function serializeAccounts(accounts: KeyedAccountInfo[]): Buffer {
 // Deserialization (wire format -> JS)
 // ---------------------------------------------------------------------------
 
-export function deserializeResult(data: Buffer): ExecutionResult<KeyedAccountInfo> {
+function readAccountFields(
+  data: Buffer,
+  o: number,
+): { owner: PublicKey; lamports: bigint; data: Buffer; executable: boolean; offset: number } {
+  const owner = new PublicKey(data.subarray(o, o + 32));
+  o += 32;
+  const lamports = data.readBigUInt64LE(o);
+  o += 8;
+  const dLen = data.readUInt32LE(o);
+  o += 4;
+  const acctData = Buffer.from(data.subarray(o, o + dLen));
+  o += dLen;
+  const executable = data[o++] !== 0;
+  return { owner, lamports, data: acctData, executable, offset: o };
+}
+
+export function deserializeResult(data: Buffer): {
+  status: ExecutionStatus;
+  computeUnits: bigint;
+  executionTimeUs: bigint;
+  returnData: Uint8Array;
+  accounts: SvmAccount[];
+  modifiedAccounts: AccountDiff<SvmAccount>[];
+  logs: string[];
+} {
   let o = 0;
 
   const rawStatus = data.readInt32LE(o);
@@ -91,20 +116,13 @@ export function deserializeResult(data: Buffer): ExecutionResult<KeyedAccountInf
 
   const numAccts = data.readUInt32LE(o);
   o += 4;
-  const accounts: KeyedAccountInfo[] = [];
+  const accounts: SvmAccount[] = [];
   for (let i = 0; i < numAccts; i++) {
-    const accountId = new PublicKey(data.subarray(o, o + 32));
+    const address = new PublicKey(data.subarray(o, o + 32));
     o += 32;
-    const owner = new PublicKey(data.subarray(o, o + 32));
-    o += 32;
-    const lamports = data.readBigUInt64LE(o);
-    o += 8;
-    const dLen = data.readUInt32LE(o);
-    o += 4;
-    const acctData = Buffer.from(data.subarray(o, o + dLen));
-    o += dLen;
-    const executable = data[o++] !== 0;
-    accounts.push({ accountId, accountInfo: { owner, lamports, data: acctData, executable } });
+    const fields = readAccountFields(data, o);
+    o = fields.offset;
+    accounts.push({ address, owner: fields.owner, lamports: fields.lamports, data: fields.data, executable: fields.executable });
   }
 
   const numLogs = data.readUInt32LE(o);
@@ -119,20 +137,30 @@ export function deserializeResult(data: Buffer): ExecutionResult<KeyedAccountInf
 
   const emLen = data.readUInt32LE(o);
   o += 4;
-  const errorMessage =
-    emLen > 0 ? data.subarray(o, o + emLen).toString("utf8") : null;
+  const errorMessage = emLen > 0 ? data.subarray(o, o + emLen).toString("utf8") : null;
+  o += emLen;
 
-  const status =
+  // Modified accounts (account diffs)
+  const numDiffs = data.readUInt32LE(o);
+  o += 4;
+  const modifiedAccounts: AccountDiff<SvmAccount>[] = [];
+  for (let i = 0; i < numDiffs; i++) {
+    const diffAddress = new PublicKey(data.subarray(o, o + 32));
+    o += 32;
+    const pre = readAccountFields(data, o);
+    o = pre.offset;
+    const post = readAccountFields(data, o);
+    o = post.offset;
+    modifiedAccounts.push({
+      pre: { address: diffAddress, owner: pre.owner, lamports: pre.lamports, data: pre.data, executable: pre.executable },
+      post: { address: diffAddress, owner: post.owner, lamports: post.lamports, data: post.data, executable: post.executable },
+    });
+  }
+
+  const status: ExecutionStatus =
     rawStatus === 0
       ? { ok: true as const }
       : { ok: false as const, error: programErrorFromStatus(rawStatus, errorMessage) };
 
-  return {
-    status,
-    computeUnits,
-    executionTimeUs,
-    returnData,
-    accounts,
-    logs,
-  };
+  return { status, computeUnits, executionTimeUs, returnData, accounts, modifiedAccounts, logs };
 }

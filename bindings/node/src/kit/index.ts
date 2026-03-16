@@ -1,20 +1,16 @@
 import type { Address } from "@solana/addresses";
-import { address, getAddressEncoder, getAddressDecoder, getAddressFromPublicKey, getProgramDerivedAddress } from "@solana/addresses";
-import { generateKeyPair } from "@solana/keys";
+import { address, getAddressEncoder, getAddressDecoder, getProgramDerivedAddress } from "@solana/addresses";
 import type { Instruction } from "@solana/instructions";
-import { lamports } from "@solana/rpc-types";
 import * as ffi from "../ffi.js";
 import {
   serializeInstructions,
   serializeAccounts,
   deserializeResult,
 } from "./wire.js";
-import type {
-  ExecutionResult,
-  Clock,
-  EpochSchedule,
-} from "../index.js";
-import type { SvmAccount } from "./types.js";
+import { ExecutionResult } from "../result.js";
+import type { Clock, EpochSchedule } from "../index.js";
+import type { SvmAccount, KitExecutionResult } from "./types.js";
+import { uniqueAddress } from "../address.js";
 import {
   SPL_TOKEN_PROGRAM_ID,
   SPL_TOKEN_2022_PROGRAM_ID,
@@ -26,21 +22,24 @@ import {
 } from "../programs.js";
 import {
   packMint, packTokenAccount, rentMinimumBalance,
-  unpackMint, unpackTokenAccount,
   tokenTransferData, tokenMintToData, tokenBurnData,
   MINT_LEN, TOKEN_ACCOUNT_LEN,
 } from "../token.js";
-import type { TokenAccountState, MintData, TokenAccountData } from "../token.js";
-import type { ProgramError, ExecutionStatus } from "../index.js";
+import type { TokenAccountState } from "../token.js";
 
-export type { KitExecutionResult, SvmAccount } from "./types.js";
-export type { ExecutionResult, ExecutionStatus, ProgramError, Clock, EpochSchedule } from "../index.js";
+export type { SvmAccount, KitExecutionResult } from "./types.js";
+export { ExecutionResult } from "../result.js";
+export type { ExecutionStatus, ProgramError, AccountDiff, Clock, EpochSchedule } from "../index.js";
 export { SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID, LOADER_V2, LOADER_V3 } from "../programs.js";
 export { TokenAccountState } from "../token.js";
 export type { MintData, TokenAccountData } from "../token.js";
 
 const addressEncoder = getAddressEncoder();
 const addressDecoder = getAddressDecoder();
+
+// ---------------------------------------------------------------------------
+// Opts
+// ---------------------------------------------------------------------------
 
 export interface MintOpts {
   mintAuthority?: Address;
@@ -60,6 +59,13 @@ export interface TokenAccountOpts {
   closeAuthority?: Address;
 }
 
+// ---------------------------------------------------------------------------
+// QuasarSvm
+// ---------------------------------------------------------------------------
+
+const findAccount = (accounts: SvmAccount[], addr: Address) =>
+  accounts.find(a => a.address === addr);
+
 export class QuasarSvm {
   private ptr: unknown;
   private freed = false;
@@ -73,6 +79,7 @@ export class QuasarSvm {
     }
   }
 
+  /** Release native resources. Call when done with the VM. */
   free(): void {
     if (!this.freed) {
       ffi.quasar_svm_free(this.ptr);
@@ -105,32 +112,7 @@ export class QuasarSvm {
     return this.addProgram(address(SPL_ASSOCIATED_TOKEN_PROGRAM_ID), loadElf("spl_associated_token.so"), LOADER_V2);
   }
 
-  addSystemProgram(): this {
-    return this;
-  }
-
-  /** Give lamports to an account, creating it if it doesn't exist. */
-  airdrop(pubkey: Address, amount: bigint): void {
-    this.check(
-      ffi.quasar_svm_airdrop(
-        this.ptr,
-        Buffer.from(addressEncoder.encode(pubkey)),
-        amount
-      )
-    );
-  }
-
-  /** Create a rent-exempt account with the given space and owner. */
-  createAccount(pubkey: Address, space: bigint, owner: Address): void {
-    this.check(
-      ffi.quasar_svm_create_account(
-        this.ptr,
-        Buffer.from(addressEncoder.encode(pubkey)),
-        space,
-        Buffer.from(addressEncoder.encode(owner))
-      )
-    );
-  }
+  // ---------- Account store ----------
 
   /** Store an account in the SVM's persistent account database. */
   setAccount(account: SvmAccount): void {
@@ -139,7 +121,7 @@ export class QuasarSvm {
       ffi.quasar_svm_set_account(
         this.ptr,
         Buffer.from(addressEncoder.encode(account.address)),
-        Buffer.from(addressEncoder.encode(account.programAddress)),
+        Buffer.from(addressEncoder.encode(account.owner)),
         BigInt(account.lamports),
         dataBuf,
         account.data.length,
@@ -165,13 +147,12 @@ export class QuasarSvm {
     const buf = Buffer.from(ffi.koffi.decode(resultPtr, "uint8_t", resultLen));
     ffi.quasar_result_free(resultPtr, resultLen);
 
-    // Deserialize: [32] pubkey [32] owner [8] lamports [4] data_len [N] data [1] executable
     let o = 0;
     const acctAddress = addressDecoder.decode(buf.subarray(o, o + 32));
     o += 32;
-    const programAddress = addressDecoder.decode(buf.subarray(o, o + 32));
+    const owner = addressDecoder.decode(buf.subarray(o, o + 32));
     o += 32;
-    const rawLamports = buf.readBigUInt64LE(o);
+    const lamports = buf.readBigUInt64LE(o);
     o += 8;
     const dLen = buf.readUInt32LE(o);
     o += 4;
@@ -180,14 +161,67 @@ export class QuasarSvm {
     const executable = buf[o] !== 0;
 
     return {
-      address: acctAddress,
+      address: acctAddress as Address,
+      lamports,
       data,
+      owner: owner as Address,
       executable,
-      lamports: lamports(rawLamports),
-      programAddress,
-      space: BigInt(dLen),
     };
   }
+
+  /** Give lamports to an account, creating it if it doesn't exist. */
+  airdrop(pubkey: Address, amount: bigint): void {
+    this.check(
+      ffi.quasar_svm_airdrop(
+        this.ptr,
+        Buffer.from(addressEncoder.encode(pubkey)),
+        amount
+      )
+    );
+  }
+
+  /** Create a rent-exempt account with the given space and owner. */
+  createAccount(pubkey: Address, space: bigint, owner: Address): void {
+    this.check(
+      ffi.quasar_svm_create_account(
+        this.ptr,
+        Buffer.from(addressEncoder.encode(pubkey)),
+        space,
+        Buffer.from(addressEncoder.encode(owner))
+      )
+    );
+  }
+
+  // ---------- Cheatcodes ----------
+
+  /** Set the token balance (amount) of an existing token account in the store. */
+  setTokenBalance(addr: Address, amount: bigint): void {
+    this.check(
+      ffi.quasar_svm_set_token_balance(
+        this.ptr,
+        Buffer.from(addressEncoder.encode(addr)),
+        amount
+      )
+    );
+  }
+
+  /** Set the supply of an existing mint account in the store. */
+  setMintSupply(addr: Address, supply: bigint): void {
+    this.check(
+      ffi.quasar_svm_set_mint_supply(
+        this.ptr,
+        Buffer.from(addressEncoder.encode(addr)),
+        supply
+      )
+    );
+  }
+
+  /** Set the clock's unix_timestamp. Does not advance slot or epoch. */
+  warpToTimestamp(timestamp: bigint): void {
+    this.check(ffi.quasar_svm_warp_to_timestamp(this.ptr, timestamp));
+  }
+
+  // ---------- Sysvars ----------
 
   setClock(opts: Clock): void {
     this.check(
@@ -227,59 +261,35 @@ export class QuasarSvm {
     this.check(ffi.quasar_svm_set_compute_budget(this.ptr, maxUnits));
   }
 
-  /** Execute a transaction without committing any state changes. */
-  simulateTransaction(
-    instructions: Instruction[],
-    accounts: SvmAccount[] | Record<string, SvmAccount>
-  ): ExecutionResult<SvmAccount> {
-    return this.exec(
-      ffi.quasar_svm_simulate_transaction,
-      serializeInstructions(instructions),
-      serializeAccounts(flattenAccounts(accounts))
-    );
-  }
+  // ---------- Execution ----------
 
-  /** Save a snapshot of the current account state. */
-  snapshot(): unknown {
-    const handle = ffi.quasar_svm_snapshot(this.ptr);
-    if (!handle) throw new Error("Failed to create snapshot");
-    return handle;
-  }
-
-  /** Restore account state from a previous snapshot. */
-  restore(snap: unknown): void {
-    this.check(ffi.quasar_svm_restore(this.ptr, snap));
-  }
-
-  /** Free a snapshot without restoring it. */
-  snapshotFree(snap: unknown): void {
-    ffi.quasar_svm_snapshot_free(snap);
-  }
-
-  processInstruction(
+  /** Execute instructions as a single atomic transaction. */
+  processTransaction(
     instructions: Instruction | Instruction[],
-    accounts: SvmAccount[] | Record<string, SvmAccount>
-  ): ExecutionResult<SvmAccount> {
+    accounts: SvmAccount[]
+  ): KitExecutionResult {
     const ixs = Array.isArray(instructions) ? instructions : [instructions];
     return this.exec(
-      ffi.quasar_svm_process_instructions,
-      serializeInstructions(ixs),
-      serializeAccounts(flattenAccounts(accounts))
-    );
-  }
-
-  processTransaction(
-    instructions: Instruction[],
-    accounts: SvmAccount[] | Record<string, SvmAccount>
-  ): ExecutionResult<SvmAccount> {
-    return this.exec(
       ffi.quasar_svm_process_transaction,
-      serializeInstructions(instructions),
-      serializeAccounts(flattenAccounts(accounts))
+      serializeInstructions(ixs),
+      serializeAccounts(accounts)
     );
   }
 
-  // ---------- internal ----------
+  /** Execute a transaction without committing any state changes. */
+  simulateTransaction(
+    instructions: Instruction | Instruction[],
+    accounts: SvmAccount[]
+  ): KitExecutionResult {
+    const ixs = Array.isArray(instructions) ? instructions : [instructions];
+    return this.exec(
+      ffi.quasar_svm_simulate_transaction,
+      serializeInstructions(ixs),
+      serializeAccounts(accounts)
+    );
+  }
+
+  // ---------- Internal ----------
 
   private check(code: number): void {
     if (code !== 0) {
@@ -293,7 +303,7 @@ export class QuasarSvm {
     fn: Function,
     ixBuf: Buffer,
     acctBuf: Buffer
-  ): ExecutionResult<SvmAccount> {
+  ): KitExecutionResult {
     const ptrOut = [null as unknown];
     const lenOut = [BigInt(0)];
 
@@ -320,55 +330,145 @@ export class QuasarSvm {
     );
 
     ffi.quasar_result_free(resultPtr, resultLen);
-    return deserializeResult(resultBuf);
+    const raw = deserializeResult(resultBuf);
+    return new ExecutionResult(raw, findAccount);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Result helpers
+// Account factories
 // ---------------------------------------------------------------------------
 
-/** Unpack a token account from execution result accounts. */
-export function tokenAccount(result: ExecutionResult<SvmAccount>, addr: Address): TokenAccountData | null {
-  const acct = result.accounts.find(a => a.address === addr);
-  if (!acct) return null;
-  return unpackTokenAccount(acct.data);
+const enc = (a: Address) => new Uint8Array(addressEncoder.encode(a));
+
+/** Create a system-owned account with the given lamports. Address auto-generated if omitted. */
+export function createSystemAccount(lamports: bigint): SvmAccount;
+export function createSystemAccount(addr: Address, lamports: bigint): SvmAccount;
+export function createSystemAccount(addrOrLamports: Address | bigint, lamports?: bigint): SvmAccount {
+  let addr: Address;
+  let sol: bigint;
+  if (typeof addrOrLamports === "bigint") {
+    addr = addressDecoder.decode(uniqueAddress()) as Address;
+    sol = addrOrLamports;
+  } else {
+    addr = addrOrLamports;
+    sol = lamports!;
+  }
+  return {
+    address: addr,
+    owner: address(SYSTEM_PROGRAM_ID),
+    lamports: sol,
+    data: new Uint8Array(0),
+    executable: false,
+  };
 }
 
-/** Unpack a mint from execution result accounts. */
-export function mintAccount(result: ExecutionResult<SvmAccount>, addr: Address): MintData | null {
-  const acct = result.accounts.find(a => a.address === addr);
-  if (!acct) return null;
-  return unpackMint(acct.data);
+/** Create a pre-initialized mint account. Address auto-generated if omitted. */
+export function createMintAccount(opts?: MintOpts, tokenProgramId?: Address): SvmAccount;
+export function createMintAccount(addr: Address, opts?: MintOpts, tokenProgramId?: Address): SvmAccount;
+export function createMintAccount(
+  first?: Address | MintOpts,
+  second?: MintOpts | Address,
+  third?: Address,
+): SvmAccount {
+  let addr: Address;
+  let opts: MintOpts;
+  let programId: Address;
+
+  if (typeof first === "string") {
+    addr = first;
+    opts = (second && typeof second !== "string") ? second : {};
+    programId = third ?? (typeof second === "string" ? second : undefined) ?? address(SPL_TOKEN_PROGRAM_ID);
+  } else {
+    addr = addressDecoder.decode(uniqueAddress()) as Address;
+    opts = first ?? {};
+    programId = typeof second === "string" ? second : address(SPL_TOKEN_PROGRAM_ID);
+  }
+
+  const data = packMint({
+    mintAuthority: opts.mintAuthority ? enc(opts.mintAuthority) : undefined,
+    supply: opts.supply,
+    decimals: opts.decimals,
+    freezeAuthority: opts.freezeAuthority ? enc(opts.freezeAuthority) : undefined,
+  });
+  return {
+    address: addr,
+    owner: programId,
+    lamports: rentMinimumBalance(MINT_LEN),
+    data,
+    executable: false,
+  };
 }
 
-/** Assert the execution succeeded. Throws with logs on failure. */
-export function assertSuccess(result: ExecutionResult<SvmAccount>): void {
-  if (!result.status.ok) {
-    const err = (result.status as { ok: false; error: ProgramError }).error;
-    throw new Error(`expected success, got ${err.type}: ${JSON.stringify(err)}\n\nLogs:\n${result.logs.join("\n")}`);
+/** Create a pre-initialized token account. Address auto-generated if omitted. */
+export function createTokenAccount(opts: TokenAccountOpts, tokenProgramId?: Address): SvmAccount;
+export function createTokenAccount(addr: Address, opts: TokenAccountOpts, tokenProgramId?: Address): SvmAccount;
+export function createTokenAccount(
+  first: Address | TokenAccountOpts,
+  second?: TokenAccountOpts | Address,
+  third?: Address,
+): SvmAccount {
+  let addr: Address;
+  let opts: TokenAccountOpts;
+  let programId: Address;
+
+  if (typeof first === "string") {
+    addr = first;
+    opts = second as TokenAccountOpts;
+    programId = third ?? address(SPL_TOKEN_PROGRAM_ID);
+  } else {
+    addr = addressDecoder.decode(uniqueAddress()) as Address;
+    opts = first;
+    programId = typeof second === "string" ? second : address(SPL_TOKEN_PROGRAM_ID);
   }
+
+  const data = packTokenAccount({
+    mint: enc(opts.mint),
+    owner: enc(opts.owner),
+    amount: opts.amount,
+    delegate: opts.delegate ? enc(opts.delegate) : undefined,
+    state: opts.state,
+    isNative: opts.isNative,
+    delegatedAmount: opts.delegatedAmount,
+    closeAuthority: opts.closeAuthority ? enc(opts.closeAuthority) : undefined,
+  });
+  return {
+    address: addr,
+    owner: programId,
+    lamports: rentMinimumBalance(TOKEN_ACCOUNT_LEN),
+    data,
+    executable: false,
+  };
 }
 
-/** Assert the execution failed with a specific error. */
-export function assertError(result: ExecutionResult<SvmAccount>, expected: ProgramError): void {
-  if (result.status.ok) {
-    throw new Error(`expected error ${JSON.stringify(expected)}, but execution succeeded`);
-  }
-  const actual = (result.status as { ok: false; error: ProgramError }).error;
-  if (actual.type !== expected.type) {
-    throw new Error(`expected error ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-  }
-  if ("code" in expected && "code" in actual && actual.code !== expected.code) {
-    throw new Error(`expected error code ${expected.code}, got ${actual.code}`);
-  }
+/** Create a pre-initialized associated token account. Derives the ATA address automatically. */
+export async function createAssociatedTokenAccount(
+  owner: Address,
+  mint: Address,
+  amount: bigint,
+  tokenProgramId: Address = address(SPL_TOKEN_PROGRAM_ID),
+): Promise<SvmAccount> {
+  const [ata] = await getProgramDerivedAddress({
+    programAddress: address(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+    seeds: [enc(owner), enc(tokenProgramId), enc(mint)],
+  });
+  const data = packTokenAccount({
+    mint: enc(mint),
+    owner: enc(owner),
+    amount,
+  });
+  return {
+    address: ata,
+    owner: tokenProgramId,
+    lamports: rentMinimumBalance(TOKEN_ACCOUNT_LEN),
+    data,
+    executable: false,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Token instruction builders
 // ---------------------------------------------------------------------------
-
-const enc = getAddressEncoder();
 
 /** Build an SPL Token Transfer instruction. */
 export function tokenTransfer(
@@ -415,153 +515,5 @@ export function tokenBurn(
       { address: authority, role: 2 },
     ],
     data: tokenBurnData(amount),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function flattenAccounts(accounts: SvmAccount[] | Record<string, SvmAccount>): SvmAccount[] {
-  return Array.isArray(accounts) ? accounts : Object.values(accounts);
-}
-
-// ---------------------------------------------------------------------------
-// User
-// ---------------------------------------------------------------------------
-
-interface UserToken {
-  mint: Address;
-  amount: bigint;
-  tokenProgramId?: Address;
-}
-
-/** A test user with a system account and optional token positions. */
-export class User {
-  readonly pubkey: Address;
-  private system: SvmAccount;
-  private atas: Map<string, SvmAccount> = new Map();
-
-  private constructor(pubkey: Address, sol: bigint) {
-    this.pubkey = pubkey;
-    this.system = createSystemAccount(pubkey, sol);
-  }
-
-  /** Create a new test user with the given SOL balance and token positions. */
-  static async create(sol: bigint, tokens: UserToken[] = []): Promise<User> {
-    const kp = await generateKeyPair();
-    const pubkey = await getAddressFromPublicKey(kp.publicKey);
-    const user = new User(pubkey, sol);
-    for (const t of tokens) {
-      const programId = t.tokenProgramId ?? address(SPL_TOKEN_PROGRAM_ID);
-      const acct = await createAssociatedTokenAccount(pubkey, t.mint, t.amount, programId);
-      user.atas.set(t.mint, acct);
-    }
-    return user;
-  }
-
-  /** Get the ATA address for a given mint. */
-  ata(mint: Address): Address {
-    const acct = this.atas.get(mint);
-    if (acct) return acct.address;
-    throw new Error(`No ATA for mint ${mint}`);
-  }
-
-  /** Flatten all accounts (system + token) for processInstruction. */
-  accounts(): SvmAccount[] {
-    return [this.system, ...this.atas.values()];
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Account factories
-// ---------------------------------------------------------------------------
-
-/** Create a system-owned account with the given lamports. */
-export function createSystemAccount(addr: Address, sol: bigint): SvmAccount {
-  return {
-    address: addr,
-    programAddress: address(SYSTEM_PROGRAM_ID),
-    lamports: lamports(sol),
-    data: new Uint8Array(0),
-    executable: false,
-    space: 0n,
-  };
-}
-
-/** Create a pre-initialized associated token account. Derives the ATA address automatically. */
-export async function createAssociatedTokenAccount(
-  owner: Address,
-  mint: Address,
-  amount: bigint,
-  tokenProgramId: Address = address(SPL_TOKEN_PROGRAM_ID),
-): Promise<SvmAccount> {
-  const enc = (a: Address) => new Uint8Array(addressEncoder.encode(a));
-  const [ata] = await getProgramDerivedAddress({
-    programAddress: address(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
-    seeds: [enc(owner), enc(tokenProgramId), enc(mint)],
-  });
-  const data = packTokenAccount({
-    mint: enc(mint),
-    owner: enc(owner),
-    amount,
-  });
-  return {
-    address: ata,
-    programAddress: tokenProgramId,
-    lamports: lamports(rentMinimumBalance(TOKEN_ACCOUNT_LEN)),
-    data,
-    executable: false,
-    space: BigInt(TOKEN_ACCOUNT_LEN),
-  };
-}
-
-/** Create a pre-initialized token account (non-ATA). */
-export function createTokenAccount(
-  addr: Address,
-  opts: TokenAccountOpts,
-  tokenProgramId: Address = address(SPL_TOKEN_PROGRAM_ID),
-): SvmAccount {
-  const enc = (a: Address) => new Uint8Array(addressEncoder.encode(a));
-  const data = packTokenAccount({
-    mint: enc(opts.mint),
-    owner: enc(opts.owner),
-    amount: opts.amount,
-    delegate: opts.delegate ? enc(opts.delegate) : undefined,
-    state: opts.state,
-    isNative: opts.isNative,
-    delegatedAmount: opts.delegatedAmount,
-    closeAuthority: opts.closeAuthority ? enc(opts.closeAuthority) : undefined,
-  });
-  return {
-    address: addr,
-    programAddress: tokenProgramId,
-    lamports: lamports(rentMinimumBalance(TOKEN_ACCOUNT_LEN)),
-    data,
-    executable: false,
-    space: BigInt(TOKEN_ACCOUNT_LEN),
-  };
-}
-
-/** Create a pre-initialized mint account. */
-export function createMintAccount(
-  addr: Address,
-  opts: MintOpts = {},
-  tokenProgramId: Address = address(SPL_TOKEN_PROGRAM_ID),
-): SvmAccount {
-  const enc = (a: Address) => new Uint8Array(addressEncoder.encode(a));
-  const data = packMint({
-    mintAuthority: opts.mintAuthority ? enc(opts.mintAuthority) : undefined,
-    supply: opts.supply,
-    decimals: opts.decimals,
-    freezeAuthority: opts.freezeAuthority ? enc(opts.freezeAuthority) : undefined,
-  });
-  return {
-    address: addr,
-    programAddress: tokenProgramId,
-    lamports: lamports(rentMinimumBalance(MINT_LEN)),
-    data,
-    executable: false,
-    space: BigInt(MINT_LEN),
   };
 }

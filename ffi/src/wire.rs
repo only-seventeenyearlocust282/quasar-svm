@@ -53,9 +53,24 @@
 //!   [N]  UTF-8 bytes
 //! [4]   error_message_len (0 = no error)
 //! [N]   error_message UTF-8 bytes
+//! [4]   num_modified_accounts
+//! per modified account:
+//!   [32] address
+//!   // pre account:
+//!   [32] owner
+//!   [8]  lamports (u64 LE)
+//!   [4]  data_len
+//!   [N]  data
+//!   [1]  executable
+//!   // post account:
+//!   [32] owner
+//!   [8]  lamports (u64 LE)
+//!   [4]  data_len
+//!   [N]  data
+//!   [1]  executable
 //! ```
 
-use quasar_svm::{Account, ExecutionResult, Instruction, Pubkey};
+use quasar_svm::{Account, AccountDiff, ExecutionResult, Instruction, Pubkey, SvmAccount};
 use solana_instruction::AccountMeta;
 use solana_program_error::ProgramError;
 
@@ -236,39 +251,39 @@ pub fn deserialize_accounts(data: &[u8]) -> Result<Vec<(Pubkey, Account)>, &'sta
 fn program_error_to_i32(err: &ProgramError) -> i32 {
     match err {
         ProgramError::Custom(n) => *n as i32,
-        ProgramError::InvalidArgument => 1,
-        ProgramError::InvalidInstructionData => 2,
-        ProgramError::InvalidAccountData => 3,
-        ProgramError::AccountDataTooSmall => 4,
-        ProgramError::InsufficientFunds => 5,
-        ProgramError::IncorrectProgramId => 6,
-        ProgramError::MissingRequiredSignature => 7,
-        ProgramError::AccountAlreadyInitialized => 8,
-        ProgramError::UninitializedAccount => 9,
-        ProgramError::NotEnoughAccountKeys => 10,
-        ProgramError::AccountBorrowFailed => 11,
-        ProgramError::MaxSeedLengthExceeded => 12,
-        ProgramError::InvalidSeeds => 13,
-        ProgramError::BorshIoError => 14,
-        ProgramError::AccountNotRentExempt => 15,
-        ProgramError::UnsupportedSysvar => 16,
-        ProgramError::IllegalOwner => 17,
-        ProgramError::MaxAccountsDataAllocationsExceeded => 18,
-        ProgramError::InvalidRealloc => 19,
-        ProgramError::MaxInstructionTraceLengthExceeded => 20,
-        ProgramError::BuiltinProgramsMustConsumeComputeUnits => 21,
-        ProgramError::InvalidAccountOwner => 22,
-        ProgramError::ArithmeticOverflow => 23,
-        ProgramError::Immutable => 24,
-        ProgramError::IncorrectAuthority => 25,
+        ProgramError::InvalidArgument => -1,
+        ProgramError::InvalidInstructionData => -2,
+        ProgramError::InvalidAccountData => -3,
+        ProgramError::AccountDataTooSmall => -4,
+        ProgramError::InsufficientFunds => -5,
+        ProgramError::IncorrectProgramId => -6,
+        ProgramError::MissingRequiredSignature => -7,
+        ProgramError::AccountAlreadyInitialized => -8,
+        ProgramError::UninitializedAccount => -9,
+        ProgramError::NotEnoughAccountKeys => -10,
+        ProgramError::AccountBorrowFailed => -11,
+        ProgramError::MaxSeedLengthExceeded => -12,
+        ProgramError::InvalidSeeds => -13,
+        ProgramError::BorshIoError => -14,
+        ProgramError::AccountNotRentExempt => -15,
+        ProgramError::UnsupportedSysvar => -16,
+        ProgramError::IllegalOwner => -17,
+        ProgramError::MaxAccountsDataAllocationsExceeded => -18,
+        ProgramError::InvalidRealloc => -19,
+        ProgramError::MaxInstructionTraceLengthExceeded => -20,
+        ProgramError::BuiltinProgramsMustConsumeComputeUnits => -21,
+        ProgramError::InvalidAccountOwner => -22,
+        ProgramError::ArithmeticOverflow => -23,
+        ProgramError::Immutable => -24,
+        ProgramError::IncorrectAuthority => -25,
     }
 }
 
-/// Serialize a single account (pubkey + fields) for the `get_account` FFI call.
+/// Serialize a single SvmAccount for the `get_account` FFI call.
 /// Format: [32] pubkey [32] owner [8] lamports [4] data_len [N] data [1] executable
-pub fn serialize_single_account(pubkey: &Pubkey, account: &Account) -> Box<[u8]> {
+pub fn serialize_single_account(account: &SvmAccount) -> Box<[u8]> {
     let mut w = Writer::new();
-    w.write_pubkey(pubkey);
+    w.write_pubkey(&account.address);
     w.write_pubkey(&account.owner);
     w.write_u64(account.lamports);
     w.write_length_prefixed(&account.data);
@@ -301,9 +316,9 @@ pub fn serialize_result(result: &ExecutionResult) -> Box<[u8]> {
     w.write_length_prefixed(&result.return_data);
 
     // Resulting accounts
-    w.write_u32(result.resulting_accounts.len() as u32);
-    for (pubkey, account) in &result.resulting_accounts {
-        w.write_pubkey(pubkey);
+    w.write_u32(result.accounts.len() as u32);
+    for account in &result.accounts {
+        w.write_pubkey(&account.address);
         w.write_pubkey(&account.owner);
         w.write_u64(account.lamports);
         w.write_length_prefixed(&account.data);
@@ -322,5 +337,28 @@ pub fn serialize_result(result: &ExecutionResult) -> Box<[u8]> {
         None => w.write_u32(0),
     }
 
+    // Modified accounts (account diffs)
+    write_modified_accounts(&mut w, &result.modified_accounts);
+
     w.into_boxed_slice()
+}
+
+/// Write modified accounts (AccountDiff list) to the wire format.
+fn write_modified_accounts(w: &mut Writer, diffs: &[AccountDiff]) {
+    w.write_u32(diffs.len() as u32);
+    for diff in diffs {
+        w.write_pubkey(&diff.address);
+        // Pre account
+        write_svm_account_fields(w, &diff.pre);
+        // Post account
+        write_svm_account_fields(w, &diff.post);
+    }
+}
+
+/// Write the fields of an SvmAccount (owner, lamports, data, executable) — no address.
+fn write_svm_account_fields(w: &mut Writer, account: &SvmAccount) {
+    w.write_pubkey(&account.owner);
+    w.write_u64(account.lamports);
+    w.write_length_prefixed(&account.data);
+    w.write_bool(account.executable);
 }

@@ -1,7 +1,8 @@
-use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
+
+use crate::SvmAccount;
 
 // ---------------------------------------------------------------------------
 // Mint
@@ -230,50 +231,65 @@ fn pack_coption_u64(opt: &Option<u64>, buf: &mut [u8], o: &mut usize) {
 }
 
 // ---------------------------------------------------------------------------
-// Account factories (standalone — no QuasarSvm needed)
+// Account factories (standalone -- no QuasarSvm needed)
 // ---------------------------------------------------------------------------
 
-/// Create a system-owned account with the given lamports.
-pub fn create_system_account(lamports: u64) -> Account {
-    Account {
+/// Create a system-owned account with a unique address.
+pub fn create_system_account(lamports: u64) -> SvmAccount {
+    create_system_account_at(&Pubkey::new_unique(), lamports)
+}
+
+/// Create a system-owned account at a specific address.
+pub fn create_system_account_at(pubkey: &Pubkey, lamports: u64) -> SvmAccount {
+    SvmAccount {
+        address: *pubkey,
         lamports,
         data: vec![],
         owner: solana_sdk_ids::system_program::ID,
         executable: false,
-        rent_epoch: 0,
     }
 }
 
-/// Create a pre-initialized mint account.
-pub fn create_mint_account(mint: &Mint, token_program_id: &Pubkey) -> Account {
-    Account {
+/// Create a pre-initialized mint account with a unique address.
+pub fn create_mint_account(mint: &Mint, token_program_id: &Pubkey) -> SvmAccount {
+    create_mint_account_at(&Pubkey::new_unique(), mint, token_program_id)
+}
+
+/// Create a pre-initialized mint account at a specific address.
+pub fn create_mint_account_at(pubkey: &Pubkey, mint: &Mint, token_program_id: &Pubkey) -> SvmAccount {
+    SvmAccount {
+        address: *pubkey,
         lamports: Rent::default().minimum_balance(Mint::LEN),
         data: mint.pack(),
         owner: *token_program_id,
         executable: false,
-        rent_epoch: 0,
     }
 }
 
-/// Create a pre-initialized token account.
-pub fn create_token_account(token: &Token, token_program_id: &Pubkey) -> Account {
-    Account {
+/// Create a pre-initialized token account with a unique address.
+pub fn create_token_account(token: &Token, token_program_id: &Pubkey) -> SvmAccount {
+    create_token_account_at(&Pubkey::new_unique(), token, token_program_id)
+}
+
+/// Create a pre-initialized token account at a specific address.
+pub fn create_token_account_at(pubkey: &Pubkey, token: &Token, token_program_id: &Pubkey) -> SvmAccount {
+    SvmAccount {
+        address: *pubkey,
         lamports: Rent::default().minimum_balance(Token::LEN),
         data: token.pack(),
         owner: *token_program_id,
         executable: false,
-        rent_epoch: 0,
     }
 }
 
 /// Create a pre-initialized associated token account.
-/// Returns `(ata_pubkey, account)`.
+/// The address is derived from the wallet, mint, and token program.
 pub fn create_associated_token_account(
     wallet: &Pubkey,
     mint: &Pubkey,
     amount: u64,
     token_program_id: &Pubkey,
-) -> (Pubkey, Account) {
+) -> SvmAccount {
     let ata = get_associated_token_address(wallet, mint, token_program_id);
     let token = Token {
         mint: *mint,
@@ -281,7 +297,7 @@ pub fn create_associated_token_account(
         amount,
         ..Default::default()
     };
-    (ata, create_token_account(&token, token_program_id))
+    create_token_account_at(&ata, &token, token_program_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -357,13 +373,23 @@ pub fn token_burn(
 
 impl crate::ExecutionResult {
     /// Unpack a token account from the resulting accounts.
-    pub fn token_account(&self, pubkey: &Pubkey) -> Option<Token> {
-        self.account(pubkey).and_then(|a| Token::unpack(&a.data))
+    pub fn token_account(&self, address: &Pubkey) -> Option<Token> {
+        self.account(address).and_then(|a| Token::unpack(&a.data))
     }
 
     /// Unpack a mint account from the resulting accounts.
-    pub fn mint_account(&self, pubkey: &Pubkey) -> Option<Mint> {
-        self.account(pubkey).and_then(|a| Mint::unpack(&a.data))
+    pub fn mint_account(&self, address: &Pubkey) -> Option<Mint> {
+        self.account(address).and_then(|a| Mint::unpack(&a.data))
+    }
+
+    /// Get the token balance (amount) of a token account.
+    pub fn token_balance(&self, address: &Pubkey) -> Option<u64> {
+        self.token_account(address).map(|t| t.amount)
+    }
+
+    /// Get the supply of a mint account.
+    pub fn mint_supply(&self, address: &Pubkey) -> Option<u64> {
+        self.mint_account(address).map(|m| m.supply)
     }
 }
 

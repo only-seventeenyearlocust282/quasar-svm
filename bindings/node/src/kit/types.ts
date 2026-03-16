@@ -1,16 +1,12 @@
 import type { Address } from "@solana/addresses";
-import type { Lamports } from "@solana/rpc-types";
-import type { ExecutionResult } from "../index.js";
+import type { ExecutionResult } from "../result.js";
 
 export interface SvmAccount {
   address: Address;
+  lamports: bigint;
   data: Uint8Array;
+  owner: Address;
   executable: boolean;
-  lamports: Lamports;
-  programAddress: Address;
-  space: bigint;
 }
 
-export type KitExecutionResult = ExecutionResult<SvmAccount>;
-
-export type { ExecutionResult, ExecutionStatus, ProgramError, Clock, EpochSchedule } from "../index.js";
+export type KitExecutionResult = ExecutionResult<SvmAccount, Address>;

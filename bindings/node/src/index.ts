@@ -24,28 +24,33 @@ export type ProgramError =
   | { type: "Custom"; code: number }
   | { type: "Runtime"; message: string };
 
-/** Map a wire status code + error message into a ProgramError. */
+/** Map a wire status code + error message into a ProgramError.
+ *  Codes match Rust `program_error_to_i32`: known errors are negative, Custom(n) is positive. */
 export function programErrorFromStatus(
   status: number,
   errorMessage: string | null
 ): ProgramError {
-  // status > 0 → Custom(n) from the program
   if (status > 0) return { type: "Custom", code: status };
 
-  // status < 0 → known runtime/instruction error
   switch (status) {
-    case -2: return { type: "InvalidArgument" };
-    case -3: return { type: "InvalidInstructionData" };
-    case -4: return { type: "InvalidAccountData" };
-    case -5: return { type: "AccountDataTooSmall" };
-    case -6: return { type: "InsufficientFunds" };
-    case -7: return { type: "IncorrectProgramId" };
-    case -8: return { type: "MissingRequiredSignature" };
-    case -9: return { type: "AccountAlreadyInitialized" };
-    case -10: return { type: "UninitializedAccount" };
-    case -11: return { type: "MissingAccount" };
-    case -12: return { type: "ComputeBudgetExceeded" };
-    case -13: return { type: "ArithmeticOverflow" };
+    case -1: return { type: "InvalidArgument" };
+    case -2: return { type: "InvalidInstructionData" };
+    case -3: return { type: "InvalidAccountData" };
+    case -4: return { type: "AccountDataTooSmall" };
+    case -5: return { type: "InsufficientFunds" };
+    case -6: return { type: "IncorrectProgramId" };
+    case -7: return { type: "MissingRequiredSignature" };
+    case -8: return { type: "AccountAlreadyInitialized" };
+    case -9: return { type: "UninitializedAccount" };
+    case -10: return { type: "MissingAccount" };
+    case -13: return { type: "InvalidSeeds" };
+    case -14: return { type: "BorshIoError" };
+    case -15: return { type: "AccountNotRentExempt" };
+    case -21: return { type: "ComputeBudgetExceeded" };
+    case -22: return { type: "InvalidAccountOwner" };
+    case -23: return { type: "ArithmeticOverflow" };
+    case -24: return { type: "Immutable" };
+    case -25: return { type: "IncorrectAuthority" };
     default: return { type: "Runtime", message: errorMessage ?? "unknown error" };
   }
 }
@@ -59,17 +64,17 @@ export type ExecutionStatus =
   | { ok: false; error: ProgramError };
 
 // ---------------------------------------------------------------------------
-// ExecutionResult
+// AccountDiff — pre/post snapshot of a modified account
 // ---------------------------------------------------------------------------
 
-export interface ExecutionResult<TAccount> {
-  status: ExecutionStatus;
-  computeUnits: bigint;
-  executionTimeUs: bigint;
-  returnData: Uint8Array;
-  accounts: TAccount[];
-  logs: string[];
+export interface AccountDiff<TAccount> {
+  pre: TAccount;
+  post: TAccount;
 }
+
+// ---------------------------------------------------------------------------
+// Sysvars
+// ---------------------------------------------------------------------------
 
 export interface Clock {
   slot: bigint;
