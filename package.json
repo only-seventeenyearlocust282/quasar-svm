@@ -24,6 +24,7 @@
   },
   "files": [
     "dist",
+    "programs",
     "include/quasar_svm.h",
     "README.md",
     "LICENSE"
@@ -48,11 +49,11 @@
     "koffi": "^2.9.0"
   },
   "optionalDependencies": {
-    "@blueshift-gg/quasar-svm-darwin-arm64": "0.1.6",
-    "@blueshift-gg/quasar-svm-darwin-x64": "0.1.6",
-    "@blueshift-gg/quasar-svm-linux-arm64-gnu": "0.1.6",
-    "@blueshift-gg/quasar-svm-linux-x64-gnu": "0.1.6",
-    "@blueshift-gg/quasar-svm-win32-x64-msvc": "0.1.6"
+    "@blueshift-gg/quasar-svm-darwin-arm64": "^0.1",
+    "@blueshift-gg/quasar-svm-darwin-x64": "^0.1",
+    "@blueshift-gg/quasar-svm-linux-arm64-gnu": "^0.1",
+    "@blueshift-gg/quasar-svm-linux-x64-gnu": "^0.1",
+    "@blueshift-gg/quasar-svm-win32-x64-msvc": "^0.1"
   },
   "peerDependencies": {
     "@solana/web3.js": "git:blueshift-gg/solana-web3.js#v2"
