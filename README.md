@@ -233,14 +233,21 @@ const vm = new QuasarSvm({
 
 ## Development
 
+This repository uses Bun for the TypeScript toolchain and package management.
+
+```bash
+bun install
+```
+
 ```bash
 # Rust
 cargo check --workspace
 cargo clippy --workspace
 
 # TypeScript
-npm run build
-npm run build:native
+bun run build
+bun run build:native
+bun run test
 ```
 
 ## License
