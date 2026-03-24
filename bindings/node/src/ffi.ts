@@ -1,5 +1,8 @@
 import koffi from "koffi";
 import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PLATFORMS: Record<string, { pkg: string; lib: string; rootLib: string }> = {
   "darwin-arm64": { pkg: "@blueshift-gg/quasar-svm-darwin-arm64",   lib: "libquasar_svm.dylib", rootLib: "libquasar_svm.dylib" },

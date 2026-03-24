@@ -1,16 +1,15 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use quasar_svm::token::{create_keyed_associated_token_account, create_keyed_mint_account, Mint};
-use quasar_svm::{Account, AccountMeta, Instruction, Pubkey, QuasarSvm, QuasarSvmConfig, SPL_TOKEN_PROGRAM_ID};
+use quasar_svm::{
+    Account, AccountMeta, Instruction, Pubkey, QuasarSvm, QuasarSvmConfig, SPL_TOKEN_PROGRAM_ID,
+};
 
 fn make_system_transfer_ix(from: &Pubkey, to: &Pubkey, lamports: u64) -> Instruction {
     let mut data = vec![2, 0, 0, 0];
     data.extend_from_slice(&lamports.to_le_bytes());
     Instruction {
         program_id: quasar_svm::system_program::ID,
-        accounts: vec![
-            AccountMeta::new(*from, true),
-            AccountMeta::new(*to, false),
-        ],
+        accounts: vec![AccountMeta::new(*from, true), AccountMeta::new(*to, false)],
         data,
     }
 }
@@ -63,8 +62,10 @@ fn bench_system_transfer(c: &mut Criterion) {
 
     c.bench_function("system_transfer", |b| {
         b.iter(|| {
-            let result =
-                svm.process_instruction(black_box(&ix), &[sender_account.clone(), recipient_account.clone()]);
+            let result = svm.process_instruction(
+                black_box(&ix),
+                &[sender_account.clone(), recipient_account.clone()],
+            );
             black_box(&result);
         });
     });
